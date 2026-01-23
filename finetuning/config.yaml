@@ -1,0 +1,76 @@
+# AstroLens Fine-Tuning Configuration
+# Copy this file and modify for custom training runs
+#
+# NOTE: Paths are relative to project root or use ASTROLENS_ARTIFACTS_DIR env var
+# Large files (datasets, weights) are stored in ../astrolens_artifacts/ by default
+
+model:
+  # Hugging Face model ID
+  base: "google/vit-base-patch16-224"
+  
+  # Number of output classes
+  num_labels: 11
+
+training:
+  # Number of training epochs
+  epochs: 10
+  
+  # Batch size per device
+  batch_size: 32
+  
+  # Learning rate (2e-5 is good for ViT fine-tuning)
+  learning_rate: 2.0e-5
+  
+  # Warmup ratio (fraction of training steps)
+  warmup_ratio: 0.1
+  
+  # Weight decay for regularization
+  weight_decay: 0.01
+  
+  # Gradient accumulation (increase for larger effective batch size)
+  gradient_accumulation_steps: 1
+  
+  # Mixed precision (fp16) - faster on GPU
+  fp16: true
+  
+  # Early stopping patience (epochs without improvement)
+  early_stopping_patience: 3
+
+data:
+  # Training data directory (ImageFolder format)
+  # Paths configured via paths.py; use DATASETS_DIR env var to override
+  train_dir: "galaxy10/train"
+  
+  # Test data directory
+  test_dir: "galaxy10/test"
+  
+  # Image size (ViT expects 224x224)
+  image_size: 224
+  
+  # Data augmentation
+  augmentation:
+    random_flip: true
+    random_rotation: 15
+    color_jitter: 0.1
+
+output:
+  # Output directory for saved model
+  # Configured via paths.py; use WEIGHTS_DIR env var to override
+  dir: "vit_astrolens"
+  
+  # Save strategy: "epoch", "steps", or "no"
+  save_strategy: "epoch"
+  
+  # Keep only N best checkpoints
+  save_total_limit: 3
+  
+  # Metric to use for best model selection
+  metric_for_best_model: "accuracy"
+
+# Logging
+logging:
+  # Log every N steps
+  logging_steps: 100
+  
+  # Report to: "none", "wandb", "tensorboard"
+  report_to: "none"

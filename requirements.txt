@@ -1,0 +1,51 @@
+# Core
+numpy>=1.24
+pillow>=10.2
+
+# API
+fastapi>=0.109
+uvicorn[standard]>=0.27
+pydantic>=2.5
+python-multipart>=0.0.6
+
+# Database
+sqlalchemy>=2.0
+aiosqlite>=0.19
+
+# ML / Vision (Hugging Face)
+torch>=2.1
+torchvision>=0.16
+transformers>=4.36         # Hugging Face Transformers (ViT)
+datasets>=2.16             # Hugging Face Datasets
+accelerate>=0.25           # Training acceleration
+safetensors>=0.4           # Safe model serialization
+
+# Vector store
+faiss-cpu>=1.7
+
+# LLM / LangChain
+langchain>=0.1
+langchain-openai>=0.0.5
+langchain-community>=0.0.20
+openai>=1.10
+
+# Astronomy (optional, for FITS support)
+astropy>=5.3
+galaxy-datasets>=0.0.15   # Galaxy Zoo datasets
+h5py>=3.10                # HDF5 file support
+
+# Desktop UI
+PyQt5>=5.15
+
+# Utils
+httpx>=0.26
+python-dotenv>=1.0
+tqdm>=4.66
+pyyaml>=6.0
+
+# Evaluation / Metrics
+scikit-learn>=1.3
+
+# Dev / Test
+pytest>=7.4
+black>=24.1
