@@ -306,6 +306,89 @@ class DiscoveryLoop:
                 )
         return self._ood_detector
 
+    def calibrate_ood_detector(self, sample_size: int = 200):
+        """
+        Calibrate OOD detector using in-distribution samples from database.
+        
+        This is CRITICAL for proper anomaly detection. Without calibration,
+        the threshold is meaningless and almost nothing will be detected.
+        """
+        logger.info("🔧 Calibrating OOD detector on in-distribution data...")
+        
+        try:
+            import numpy as np
+            
+            # Get sample of normal images from database
+            response = httpx.get(
+                f"{API_BASE}/images",
+                params={"limit": sample_size, "anomaly_only": False},
+            )
+            response.raise_for_status()
+            images = response.json()
+            
+            if len(images) < 20:
+                logger.warning(f"  ⚠ Only {len(images)} images available, need more for calibration")
+                return False
+            
+            # Run classifier on each to get logits/embeddings
+            embeddings = []
+            logits_list = []
+            labels = []
+            
+            class_to_idx = {c: i for i, c in enumerate(self.classifier.classes)}
+            
+            for img in images[:sample_size]:
+                try:
+                    filepath = img.get("filepath")
+                    if not filepath or not Path(filepath).exists():
+                        continue
+                    
+                    result = self.classifier.classify(filepath)
+                    embeddings.append(result.embedding)
+                    logits_list.append(result.logits)
+                    
+                    # Use predicted class as pseudo-label
+                    label_idx = class_to_idx.get(result.class_label, 0)
+                    labels.append(label_idx)
+                    
+                except Exception as e:
+                    continue
+            
+            if len(embeddings) < 20:
+                logger.warning(f"  ⚠ Only {len(embeddings)} valid samples, need more")
+                return False
+            
+            # Convert to numpy arrays
+            embeddings = np.array(embeddings)
+            logits_array = np.array(logits_list)
+            labels = np.array(labels)
+            
+            # Calibrate the detector
+            self.ood_detector.calibrate(
+                embeddings=embeddings,
+                logits=logits_array,
+                labels=labels,
+                target_fpr=0.05,  # 5% false positive rate
+            )
+            
+            # Update threshold based on calibration
+            old_threshold = self.stats.current_threshold
+            self.stats.current_threshold = self.ood_detector.energy_threshold
+            
+            logger.info(f"  ✓ Calibrated on {len(embeddings)} samples")
+            logger.info(f"  📊 New thresholds:")
+            logger.info(f"     MSP: {self.ood_detector.msp_threshold:.3f}")
+            logger.info(f"     Energy: {self.ood_detector.energy_threshold:.3f}")
+            logger.info(f"     Mahalanobis: {self.ood_detector.mahal_threshold:.3f}")
+            logger.info(f"  📉 Threshold: {old_threshold:.3f} → {self.stats.current_threshold:.3f}")
+            
+            self._save_state()
+            return True
+            
+        except Exception as e:
+            logger.warning(f"  ⚠ Calibration failed: {e}")
+            return False
+
     @property
     def duplicate_detector(self):
         """Lazy-load duplicate detector."""
@@ -1022,15 +1105,24 @@ class DiscoveryLoop:
                         logger.info(f"  📉 Change: {improvement_pct:.1f}%")
                     
                     # Update model accuracy in stats
-                    if self.stats.initial_accuracy == 0:
-                        self.stats.initial_accuracy = first_accuracy
-                    self.stats.model_accuracy = last_accuracy
+                    # IMPORTANT: Only use Galaxy10 for primary accuracy tracking
+                    # (anomalies/galaxy_zoo have much lower baseline accuracy)
+                    is_primary_dataset = dataset in ("galaxy10", "Galaxy10")
                     
-                    # Calculate total improvement since start
-                    if self.stats.initial_accuracy > 0:
-                        self.stats.total_improvement_pct = (
-                            (last_accuracy - self.stats.initial_accuracy) / self.stats.initial_accuracy * 100
-                        )
+                    if is_primary_dataset:
+                        if self.stats.initial_accuracy == 0 or self.stats.initial_accuracy < 0.5:
+                            # Set initial from Galaxy10 (should be ~80%+)
+                            self.stats.initial_accuracy = first_accuracy
+                        self.stats.model_accuracy = last_accuracy
+                        
+                        # Calculate total improvement since start (Galaxy10 only)
+                        if self.stats.initial_accuracy > 0.5:
+                            self.stats.total_improvement_pct = (
+                                (last_accuracy - self.stats.initial_accuracy) / self.stats.initial_accuracy * 100
+                            )
+                    else:
+                        # For anomaly/galaxy_zoo runs, log but don't update primary metrics
+                        logger.info(f"  ℹ️  {dataset} accuracy: {last_accuracy:.1%} (not primary metric)")
                 
                 # Record training run in history
                 training_run = {
@@ -1179,6 +1271,20 @@ class DiscoveryLoop:
         else:
             logger.warning("⚠ API not running - will analyze locally only")
         
+        # Check if OOD detector needs calibration
+        # If threshold >> highest_ood_score and we have data, calibration is probably needed
+        threshold_miscalibrated = (
+            self.stats.highest_ood_score > 0 and
+            self.stats.current_threshold > self.stats.highest_ood_score * 3
+        )
+        
+        if threshold_miscalibrated:
+            logger.info("\n⚠️  OOD threshold appears miscalibrated:")
+            logger.info(f"   Threshold: {self.stats.current_threshold:.3f}")
+            logger.info(f"   Highest OOD seen: {self.stats.highest_ood_score:.3f}")
+            logger.info("   Attempting auto-calibration...")
+            self.calibrate_ood_detector()
+        
         logger.info("\n📊 Sources enabled: SDSS, ZTF, NASA APOD, Galaxy Zoo Anomalies")
         logger.info("   Galaxy Zoo anomalies provide labeled unusual galaxies for training")
         
@@ -1273,6 +1379,22 @@ Examples:
         action="store_true",
         help="Reset discovery state and start fresh",
     )
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="Force OOD detector calibration before running",
+    )
+    parser.add_argument(
+        "--crossref",
+        action="store_true",
+        help="Cross-reference all anomalies against catalogs (SIMBAD, NED) and exit",
+    )
+    parser.add_argument(
+        "--crossref-limit",
+        type=int,
+        default=100,
+        help="Maximum anomalies to cross-reference (default: 100)",
+    )
     
     args = parser.parse_args()
     
@@ -1283,6 +1405,62 @@ Examples:
                 f.unlink()
         logger.info("State reset - starting fresh")
     
+    # Cross-reference mode: query catalogs and exit
+    if args.crossref:
+        logger.info("="*60)
+        logger.info("🔍 CATALOG CROSS-REFERENCE MODE")
+        logger.info("="*60)
+        
+        from catalog.cross_reference import CatalogCrossReference
+        
+        xref = CatalogCrossReference()
+        
+        # Get anomalies from API
+        try:
+            response = httpx.get(
+                f"{API_BASE}/candidates",
+                params={"limit": args.crossref_limit},
+            )
+            response.raise_for_status()
+            anomalies = response.json()
+            
+            if not anomalies:
+                logger.info("No anomaly candidates found in database")
+                return
+            
+            logger.info(f"Found {len(anomalies)} anomaly candidates")
+            logger.info(f"Querying SIMBAD and NED for each (this may take a while)...")
+            
+            def progress_callback(current, total, result):
+                status = "✓ KNOWN" if result.is_known else "★ UNKNOWN"
+                logger.info(f"  [{current}/{total}] {status}: {Path(result.image_path).name}")
+                if result.primary_match:
+                    logger.info(f"       → {result.primary_match.object_name} ({result.primary_match.object_type})")
+            
+            stats = xref.cross_reference_all(
+                [{"id": a["id"], "filepath": a["filepath"]} for a in anomalies],
+                progress_callback=progress_callback,
+            )
+            
+            logger.info("\n" + "="*60)
+            logger.info("📊 CROSS-REFERENCE RESULTS")
+            logger.info("="*60)
+            logger.info(f"Total checked:    {stats['total']}")
+            logger.info(f"Known objects:    {stats['known']} (already in catalogs)")
+            logger.info(f"UNKNOWN objects:  {stats['unknown']} ← potential discoveries!")
+            logger.info(f"With publications:{stats['published']}")
+            logger.info(f"Errors:           {stats['errors']}")
+            logger.info(f"Skipped (cached): {stats['skipped']}")
+            logger.info("="*60)
+            
+            summary = xref.get_summary()
+            logger.info(f"\n💾 Results saved to: {ARTIFACTS_DIR / 'data' / 'cross_reference_results.json'}")
+            
+        except Exception as e:
+            logger.error(f"Cross-reference failed: {e}")
+        
+        return
+    
     loop = DiscoveryLoop(
         cycle_interval_minutes=args.interval,
         images_per_cycle=args.images,
@@ -1292,6 +1470,11 @@ Examples:
         aggressive=args.aggressive,
         turbo=args.turbo,
     )
+    
+    # Force calibration if requested
+    if args.calibrate:
+        logger.info("\n🔧 Forcing OOD detector calibration...")
+        loop.calibrate_ood_detector()
     
     loop.run()
 

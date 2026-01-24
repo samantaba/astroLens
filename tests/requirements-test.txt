@@ -1,0 +1,25 @@
+# Test dependencies for AstroLens
+
+# Core testing
+pytest>=7.0.0
+pytest-timeout>=2.1.0
+pytest-xdist>=3.0.0  # Parallel test execution
+
+# Mocking and fixtures
+pytest-mock>=3.10.0
+
+# Coverage
+pytest-cov>=4.0.0
+
+# HTTP testing
+httpx>=0.24.0
+respx>=0.20.0  # Mock httpx requests
+
+# Benchmarking
+pytest-benchmark>=4.0.0
+
+# Async testing
+pytest-asyncio>=0.21.0
+
+# Utilities
+numpy>=1.20.0

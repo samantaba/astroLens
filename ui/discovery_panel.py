@@ -526,35 +526,8 @@ class DiscoveryPanel(QWidget):
         threshold_label.setStyleSheet("color: #7a8599; font-size: 11px; border: none;")
         threshold_layout.addWidget(threshold_label)
         
-        # Preset buttons
-        presets = [("0.3", 0.3, "#f87171"), ("0.5", 0.5, "#fbbf24"), ("1.0", 1.0, "#34d399"), ("2.0", 2.0, "#94a3b8")]
-        self.threshold_btns = []
-        for label, value, color in presets:
-            btn = QPushButton(label)
-            btn.setFixedSize(36, 24)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: rgba(40, 50, 70, 0.5);
-                    border: 1px solid {color}40;
-                    border-radius: 4px;
-                    color: {color};
-                    font-size: 10px;
-                    font-weight: 600;
-                }}
-                QPushButton:hover {{
-                    background: {color}30;
-                }}
-                QPushButton:checked {{
-                    background: {color}40;
-                    border-color: {color};
-                }}
-            """)
-            btn.setCheckable(True)
-            btn.clicked.connect(lambda checked, v=value: self._set_threshold(v))
-            threshold_layout.addWidget(btn)
-            self.threshold_btns.append((btn, value))
-        
-        # Custom spin box (smaller)
+        # Note: Threshold is adaptive during discovery - starts at spinbox value
+        # and automatically adjusts based on detection results
         self.threshold_spin = QDoubleSpinBox()
         self.threshold_spin.setRange(0.1, 5.0)
         self.threshold_spin.setValue(0.5)  # Default to more sensitive
@@ -608,9 +581,38 @@ class DiscoveryPanel(QWidget):
         self.start_btn.clicked.connect(self._toggle_discovery)
         controls.addWidget(self.start_btn)
         
+        # Verify button - opens verification panel
+        self.verify_btn = QPushButton("🔍 Verify")
+        self.verify_btn.setToolTip("Cross-reference anomalies against astronomical catalogs")
+        self.verify_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(91, 141, 239, 0.2);
+                border: 1px solid rgba(91, 141, 239, 0.4);
+                border-radius: 10px;
+                padding: 12px 20px;
+                color: #5b8def;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background: rgba(91, 141, 239, 0.3);
+            }
+        """)
+        self.verify_btn.clicked.connect(self._open_verification)
+        controls.addWidget(self.verify_btn)
+        
         header.addLayout(controls)
         
         return header
+    
+    def _open_verification(self):
+        """Request parent to open verification panel."""
+        # Navigate to verification tab via parent control center
+        parent = self.parent()
+        while parent:
+            if hasattr(parent, 'show_verification'):
+                parent.show_verification()
+                break
+            parent = parent.parent()
     
     def _create_stats_panel(self) -> QWidget:
         panel = QWidget()
@@ -805,21 +807,11 @@ class DiscoveryPanel(QWidget):
         self.refresh_timer.timeout.connect(self._refresh_data)
         self.refresh_timer.start(3000)  # Every 3 seconds (was 2)
     
-    def _set_threshold(self, value: float):
-        """Set threshold from preset button."""
-        self.threshold_spin.setValue(value)
-        # Update button states
-        for btn, v in self.threshold_btns:
-            btn.setChecked(abs(v - value) < 0.01)
-    
     def _on_threshold_changed(self, value: float):
         """Update gauge immediately when threshold spinbox changes."""
         if not self.is_running:
             # Only update if discovery is not running (otherwise state file is source of truth)
             self.threshold_gauge.set_values(value, self.threshold_gauge.highest_ood)
-        # Update preset button states
-        for btn, v in self.threshold_btns:
-            btn.setChecked(abs(v - value) < 0.01)
     
     def _toggle_discovery(self):
         if self.is_running:

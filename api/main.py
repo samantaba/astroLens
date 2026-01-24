@@ -552,3 +552,185 @@ async def list_candidates(
     """List anomaly candidates (is_anomaly=True), sorted by OOD score."""
     records = get_images(db, skip=skip, limit=limit, anomaly_only=True)
     return [ImageSummary.model_validate(r) for r in records]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Catalog Cross-Reference
+# ─────────────────────────────────────────────────────────────────────────────
+
+_cross_reference = None
+
+def get_cross_reference():
+    """Lazy-load catalog cross-reference system."""
+    global _cross_reference
+    if _cross_reference is None:
+        from catalog.cross_reference import CatalogCrossReference
+        _cross_reference = CatalogCrossReference()
+    return _cross_reference
+
+
+class CrossRefRequest(BaseModel):
+    """Request for cross-referencing an image."""
+    ra: Optional[float] = None
+    dec: Optional[float] = None
+    force: bool = False
+
+
+class CrossRefResult(BaseModel):
+    """Result of catalog cross-reference."""
+    image_id: int
+    is_known: bool
+    is_published: bool
+    status: str
+    primary_match: Optional[dict] = None
+    total_matches: int
+    queried_at: str
+    error_message: str = ""
+
+
+class CrossRefSummary(BaseModel):
+    """Summary of all cross-reference results."""
+    total_checked: int
+    known_objects: int
+    unknown_objects: int
+    with_publications: int
+    human_verified: int
+    false_positives: int
+    true_positives: int
+
+
+class CrossRefBatchResult(BaseModel):
+    """Result of batch cross-reference operation."""
+    total: int
+    known: int
+    unknown: int
+    published: int
+    errors: int
+    skipped: int
+
+
+@app.post("/crossref/{image_id}", response_model=CrossRefResult)
+async def cross_reference_image(
+    image_id: int,
+    request: CrossRefRequest = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Cross-reference a single image against astronomical catalogs (SIMBAD, NED).
+    
+    This queries real astronomical databases to check if the detected anomaly
+    is a known object or potentially a new discovery.
+    """
+    record = get_image(db, image_id)
+    if not record:
+        raise HTTPException(404, "Image not found")
+    
+    try:
+        xref = get_cross_reference()
+        ra = request.ra if request else None
+        dec = request.dec if request else None
+        force = request.force if request else False
+        
+        result = xref.cross_reference(
+            image_id=image_id,
+            image_path=record.filepath,
+            ra=ra,
+            dec=dec,
+            force=force,
+        )
+        
+        primary_match = None
+        if result.primary_match:
+            primary_match = {
+                "catalog": result.primary_match.catalog,
+                "object_name": result.primary_match.object_name,
+                "object_type": result.primary_match.object_type,
+                "distance_arcsec": result.primary_match.distance_arcsec,
+                "bibcodes": result.primary_match.bibcodes,
+                "url": result.primary_match.url,
+            }
+        
+        return CrossRefResult(
+            image_id=image_id,
+            is_known=result.is_known,
+            is_published=result.is_published,
+            status=result.status,
+            primary_match=primary_match,
+            total_matches=len(result.matches),
+            queried_at=result.queried_at,
+            error_message=result.error_message,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Cross-reference failed: {e}")
+
+
+@app.get("/crossref/summary", response_model=CrossRefSummary)
+async def get_crossref_summary():
+    """Get summary of all cross-reference results."""
+    try:
+        xref = get_cross_reference()
+        summary = xref.get_summary()
+        return CrossRefSummary(**summary)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to get summary: {e}")
+
+
+@app.post("/crossref/batch", response_model=CrossRefBatchResult)
+async def cross_reference_all_candidates(
+    limit: int = Query(100, ge=1, le=1000),
+    db: Session = Depends(get_db),
+):
+    """
+    Cross-reference all anomaly candidates against catalogs.
+    
+    This will query SIMBAD and NED for each anomaly to determine if it's
+    a known object or potentially a new discovery.
+    
+    Note: This can take a while for many anomalies (0.5s delay between queries
+    to be respectful to catalog servers).
+    """
+    try:
+        # Get all anomaly candidates
+        records = get_images(db, skip=0, limit=limit, anomaly_only=True)
+        
+        anomalies = [
+            {"id": r.id, "filepath": r.filepath}
+            for r in records
+        ]
+        
+        if not anomalies:
+            return CrossRefBatchResult(
+                total=0, known=0, unknown=0, published=0, errors=0, skipped=0
+            )
+        
+        xref = get_cross_reference()
+        stats = xref.cross_reference_all(anomalies)
+        
+        return CrossRefBatchResult(**stats)
+    except Exception as e:
+        raise HTTPException(500, f"Batch cross-reference failed: {e}")
+
+
+class VerifyRequest(BaseModel):
+    """Request to verify a cross-reference result."""
+    label: str  # true_positive, false_positive, uncertain
+    verified_by: str = "user"
+
+
+@app.post("/crossref/{image_id}/verify")
+async def verify_crossref_result(
+    image_id: int,
+    request: VerifyRequest,
+):
+    """
+    Mark a cross-reference result as human-verified.
+    
+    This helps track false positives and true positives for model improvement.
+    Labels: true_positive, false_positive, uncertain
+    """
+    try:
+        xref = get_cross_reference()
+        xref.mark_verified(image_id, request.label, request.verified_by)
+        return {"ok": True, "image_id": image_id, "label": request.label}
+    except Exception as e:
+        raise HTTPException(500, f"Verification failed: {e}")

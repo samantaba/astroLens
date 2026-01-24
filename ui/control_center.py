@@ -19,6 +19,7 @@ from .download_panel import DownloadPanel
 from .batch_panel import BatchPanel
 from .training_panel import TrainingPanel
 from .discovery_panel import DiscoveryPanel
+from .verification_panel import VerificationPanel
 
 
 class ControlCenter(QWidget):
@@ -94,8 +95,10 @@ class ControlCenter(QWidget):
         self.batch_panel = BatchPanel(self.api)
         self.training_panel = TrainingPanel()
         self.discovery_panel = DiscoveryPanel()
+        self.verification_panel = VerificationPanel()
         
         self.tabs.addTab(self.discovery_panel, "🔭 Discovery")
+        self.tabs.addTab(self.verification_panel, "🔍 Verify")
         self.tabs.addTab(self.sources_panel, "Data Sources")
         self.tabs.addTab(self.download_panel, "Downloads")
         self.tabs.addTab(self.batch_panel, "Batch Analysis")
@@ -135,6 +138,9 @@ class ControlCenter(QWidget):
     
     def show_discovery(self):
         self.tabs.setCurrentWidget(self.discovery_panel)
+    
+    def show_verification(self):
+        self.tabs.setCurrentWidget(self.verification_panel)
     
     def _on_discovery_anomaly(self, candidate: dict):
         """Handle anomaly found by discovery loop."""
