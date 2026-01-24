@@ -55,6 +55,7 @@ class OODDetector:
         mahal_threshold: float = 50.0,  # Above this distance = suspicious
         use_ensemble: bool = True,
         voting_threshold: int = 2,  # Number of methods that must agree
+        aggressive_mode: bool = False,  # If True, use very sensitive detection
     ):
         """
         Args:
@@ -73,6 +74,13 @@ class OODDetector:
         self.mahal_threshold = mahal_threshold
         self.use_ensemble = use_ensemble
         self.voting_threshold = voting_threshold
+        
+        # Aggressive mode: much more sensitive detection for breakthrough hunting
+        if aggressive_mode:
+            self.msp_threshold = 0.7  # Flag if confidence < 70%
+            self.energy_threshold = 0.5  # Much lower energy threshold
+            self.voting_threshold = 1  # Single method vote is enough
+            logger.info("🎯 OOD Detector in AGGRESSIVE mode - very sensitive")
         
         # Class statistics for Mahalanobis (computed during calibration)
         self.class_means: Optional[np.ndarray] = None

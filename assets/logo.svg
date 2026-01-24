@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="lensGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#5b8def;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#34d399;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#a78bfa;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#5b8def;stop-opacity:0.8" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="60" cy="60" r="56" fill="#0f172a" stroke="url(#ringGrad)" stroke-width="2"/>
+  
+  <!-- Outer lens ring -->
+  <circle cx="60" cy="60" r="42" fill="none" stroke="url(#lensGrad)" stroke-width="4" opacity="0.6"/>
+  
+  <!-- Inner lens -->
+  <circle cx="60" cy="60" r="28" fill="url(#lensGrad)" opacity="0.2"/>
+  <circle cx="60" cy="60" r="28" fill="none" stroke="url(#lensGrad)" stroke-width="2"/>
+  
+  <!-- Center dot (aperture) -->
+  <circle cx="60" cy="60" r="8" fill="url(#lensGrad)" filter="url(#glow)"/>
+  
+  <!-- Stars -->
+  <g fill="#fbbf24" filter="url(#glow)">
+    <circle cx="25" cy="30" r="2"/>
+    <circle cx="95" cy="25" r="1.5"/>
+    <circle cx="90" cy="85" r="2"/>
+    <circle cx="30" cy="90" r="1.5"/>
+    <circle cx="45" cy="20" r="1"/>
+    <circle cx="80" cy="95" r="1"/>
+  </g>
+  
+  <!-- Anomaly indicator (red dot) -->
+  <circle cx="78" cy="45" r="6" fill="#f87171" opacity="0.9" filter="url(#glow)"/>
+  <circle cx="78" cy="45" r="3" fill="#ffffff" opacity="0.8"/>
+  
+  <!-- Scanning lines -->
+  <g stroke="#34d399" stroke-width="1" opacity="0.4">
+    <line x1="60" y1="18" x2="60" y2="102"/>
+    <line x1="18" y1="60" x2="102" y2="60"/>
+  </g>
+</svg>

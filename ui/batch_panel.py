@@ -11,6 +11,7 @@ from typing import List
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QProgressBar, QScrollArea, QSpacerItem, QSizePolicy,
+    QApplication,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
 
@@ -363,15 +364,41 @@ class BatchPanel(QWidget):
         
         return card
     
+    def _fetch_all_images(self) -> list:
+        """Fetch all images using pagination."""
+        all_images = []
+        skip = 0
+        batch_size = 1000
+        
+        while True:
+            response = self.api.get("/images", params={"limit": batch_size, "skip": skip})
+            if response.status_code != 200:
+                break
+            
+            batch = response.json()
+            if not batch:
+                break
+            
+            all_images.extend(batch)
+            skip += len(batch)
+            
+            # Progress indicator
+            self.status_label.setText(f"Loading images... {len(all_images)}")
+            QApplication.processEvents()
+            
+            if len(batch) < batch_size:
+                break
+        
+        return all_images
+    
     def _analyze_unanalyzed(self):
         """Analyze only unanalyzed images."""
         try:
-            response = self.api.get("/images", params={"limit": 2000})
-            if response.status_code != 200:
-                self.status_label.setText(f"Error: API returned {response.status_code}")
+            images = self._fetch_all_images()
+            if not images:
+                self.status_label.setText("Error: Could not fetch images")
                 return
             
-            images = response.json()
             unanalyzed = [img["id"] for img in images if not img.get("class_label")]
             
             if not unanalyzed:
@@ -386,12 +413,7 @@ class BatchPanel(QWidget):
     def _analyze_all(self):
         """Re-analyze all images."""
         try:
-            response = self.api.get("/images", params={"limit": 2000})
-            if response.status_code != 200:
-                self.status_label.setText(f"Error: API returned {response.status_code}")
-                return
-            
-            images = response.json()
+            images = self._fetch_all_images()
             if not images:
                 self.status_label.setText("No images to analyze")
                 return
@@ -403,12 +425,7 @@ class BatchPanel(QWidget):
     def _rebuild_embeddings(self):
         """Rebuild similarity embeddings."""
         try:
-            response = self.api.get("/images", params={"limit": 2000})
-            if response.status_code != 200:
-                self.status_label.setText(f"Error: API returned {response.status_code}")
-                return
-            
-            images = response.json()
+            images = self._fetch_all_images()
             if not images:
                 self.status_label.setText("No images to process")
                 return

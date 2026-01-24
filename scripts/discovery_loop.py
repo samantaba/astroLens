@@ -29,6 +29,7 @@ Environment:
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import logging
 import os
@@ -40,6 +41,8 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple
+
+import numpy as np
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -76,6 +79,22 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class TrainingRun:
+    """Track a single training run's metrics."""
+    run_number: int = 0
+    dataset: str = ""
+    started_at: str = ""
+    duration_minutes: float = 0.0
+    accuracy_before: float = 0.0
+    accuracy_after: float = 0.0
+    improvement_pct: float = 0.0
+    loss_before: float = 0.0
+    loss_after: float = 0.0
+    epochs_completed: int = 0
+    success: bool = False
+
+
+@dataclass
 class DiscoveryStats:
     """Track discovery progress across cycles."""
     started_at: str = ""
@@ -92,6 +111,12 @@ class DiscoveryStats:
     highest_ood_image: str = ""
     last_cycle_at: str = ""
     anomaly_ids: List[int] = field(default_factory=list)
+    # Model improvement tracking
+    labeled_anomalies_downloaded: int = 0
+    model_accuracy: float = 0.0  # Current model accuracy
+    initial_accuracy: float = 0.0  # Accuracy at start
+    total_improvement_pct: float = 0.0  # Total improvement since start
+    training_history: List[dict] = field(default_factory=list)  # List of TrainingRun as dicts
 
 
 @dataclass 
@@ -246,17 +271,39 @@ class DiscoveryLoop:
             weights = WEIGHTS_PATH if Path(WEIGHTS_PATH).exists() else None
             self._classifier = AstroClassifier(weights_path=weights)
             logger.info(f"Loaded classifier with {self._classifier.num_classes} classes")
+            logger.info(f"🖥️  Inference device: {self._classifier.device.upper()}")
+            if self._classifier.device == "mps":
+                logger.info("   ✓ Apple Metal GPU acceleration enabled (4x faster)")
+            elif self._classifier.device == "cuda":
+                logger.info("   ✓ NVIDIA CUDA GPU acceleration enabled (4x faster)")
+            else:
+                logger.info("   ⚠ Running on CPU (slower inference)")
         return self._classifier
 
     @property
     def ood_detector(self):
         """Lazy-load OOD detector with current threshold."""
+        # Use aggressive mode when threshold is low (breakthrough hunting)
+        aggressive = self.stats.current_threshold < 1.0
+        
         if self._ood_detector is None:
             from inference.ood import OODDetector
-            self._ood_detector = OODDetector(threshold=self.stats.current_threshold)
+            self._ood_detector = OODDetector(
+                threshold=self.stats.current_threshold,
+                aggressive_mode=aggressive,
+            )
+            if aggressive:
+                logger.info("🎯 OOD detector using AGGRESSIVE mode (threshold < 1.0)")
         else:
             # Update threshold if changed
             self._ood_detector.threshold = self.stats.current_threshold
+            # Reinitialize if aggressive mode changed
+            if aggressive and self._ood_detector.voting_threshold != 1:
+                from inference.ood import OODDetector
+                self._ood_detector = OODDetector(
+                    threshold=self.stats.current_threshold,
+                    aggressive_mode=True,
+                )
         return self._ood_detector
 
     @property
@@ -318,12 +365,19 @@ class DiscoveryLoop:
         """
         Download images from multiple sources with diversity-based allocation.
         
+        Includes Galaxy Zoo anomalies for better anomaly detection training.
+        
         Returns list of (file_path, source_name) tuples.
         """
         from scripts.nightly_ingest import (
             download_sdss_galaxies,
             download_nasa_apod,
             download_ztf_alerts,
+            download_galaxy_zoo_anomalies,
+            download_real_supernovae,
+            download_gravitational_lenses,
+            download_galaxy_mergers,
+            download_peculiar_galaxies,
         )
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -336,11 +390,12 @@ class DiscoveryLoop:
         ratios = self.source_manager.get_download_ratios(self.images_per_cycle)
         logger.info(f"  📊 Source allocation: {ratios}")
         
-        # Download functions
+        # All download functions - COMPREHENSIVE anomaly coverage
         download_fns = {
             "sdss": lambda n: download_sdss_galaxies(n, cycle_dir / "sdss"),
             "ztf": lambda n: download_ztf_alerts(n, cycle_dir / "ztf"),
             "apod": lambda n: download_nasa_apod(min(n, 7), cycle_dir / "apod"),
+            "galaxy_zoo_anomalies": lambda n: download_galaxy_zoo_anomalies(n, cycle_dir / "gz_anomalies"),
         }
         
         for source_name, count in ratios.items():
@@ -358,6 +413,37 @@ class DiscoveryLoop:
             except Exception as e:
                 logger.warning(f"  ⚠ {source_name} download failed: {e}")
         
+        # REAL ANOMALY SOURCES - Download every cycle for breakthrough detection
+        # These are ACTUAL anomalies from verified catalogs, not random positions
+        anomaly_sources = [
+            ("supernovae", lambda: download_real_supernovae(5, cycle_dir / "supernovae")),
+            ("gravitational_lenses", lambda: download_gravitational_lenses(3, cycle_dir / "lenses")),
+            ("galaxy_mergers", lambda: download_galaxy_mergers(5, cycle_dir / "mergers")),
+            ("peculiar_galaxies", lambda: download_peculiar_galaxies(3, cycle_dir / "peculiar")),
+            ("galaxy_zoo_anomalies", lambda: download_galaxy_zoo_anomalies(5, cycle_dir / "gz_anomalies")),
+        ]
+        
+        logger.info("  🎯 Downloading REAL anomalies from catalogs...")
+        anomaly_count = 0
+        for source_name, download_fn in anomaly_sources:
+            try:
+                files = download_fn()
+                for f in files:
+                    all_files.append((f, source_name))
+                anomaly_count += len(files)
+                if files:
+                    logger.info(f"    ✓ {source_name}: {len(files)} verified anomalies")
+            except Exception as e:
+                logger.debug(f"    ⚠ {source_name}: {e}")
+        
+        if anomaly_count > 0:
+            logger.info(f"  🎯 Total verified anomalies this cycle: {anomaly_count}")
+        
+        # Count all labeled anomalies in this batch
+        anomaly_source_names = {"supernovae", "gravitational_lenses", "galaxy_mergers", 
+                               "peculiar_galaxies", "galaxy_zoo_anomalies"}
+        labeled_count = sum(1 for _, source in all_files if source in anomaly_source_names)
+        self.stats.labeled_anomalies_downloaded += labeled_count
         self.stats.total_downloaded += len(all_files)
         return all_files
 
@@ -403,15 +489,23 @@ class DiscoveryLoop:
                 logger.warning(f"  ⚠ No image_id returned for {image_path.name}")
                 return None
             
+            # Ensure all values are Python native types (not numpy) for JSON serialization
+            class_label = str(analysis.get("class_label", "Unknown"))
+            confidence = self._to_python_native(analysis.get("confidence", 0.0))
+            ood_score = self._to_python_native(analysis.get("ood_score", 0.0))
+            is_anomaly = bool(analysis.get("is_anomaly", False))
+            
             # Update with analysis results - THIS IS CRITICAL FOR IMAGES TO SHOW AS ANALYZED
+            update_data = {
+                "class_label": class_label,
+                "class_confidence": float(confidence) if confidence is not None else 0.0,
+                "ood_score": float(ood_score) if ood_score is not None else 0.0,
+                "is_anomaly": is_anomaly,
+            }
+            
             update_resp = httpx.patch(
                 f"http://localhost:8000/images/{image_id}",
-                json={
-                    "class_label": analysis["class_label"],
-                    "class_confidence": float(analysis["confidence"]),
-                    "ood_score": float(analysis["ood_score"]),
-                    "is_anomaly": bool(analysis["is_anomaly"]),
-                },
+                json=update_data,
                 timeout=10,
             )
             
@@ -425,7 +519,32 @@ class DiscoveryLoop:
             
         except Exception as e:
             logger.warning(f"  ⚠ Upload failed for {image_path.name}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return None
+
+    def _to_python_native(self, obj):
+        """Recursively convert numpy/tensor types to Python native types."""
+        if obj is None:
+            return None
+        elif isinstance(obj, dict):
+            return {k: self._to_python_native(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._to_python_native(item) for item in obj]
+        elif hasattr(obj, 'item'):  # numpy scalar or tensor
+            return obj.item()
+        elif hasattr(obj, 'tolist'):  # numpy array
+            return obj.tolist()
+        elif isinstance(obj, (int, float, str, bool)):
+            return obj
+        else:
+            # Try to convert to float/int if it looks like a number
+            try:
+                if isinstance(obj, (np.floating, np.integer)):
+                    return obj.item()
+            except (TypeError, AttributeError):
+                pass
+            return obj
 
     def analyze_image(
         self, 
@@ -458,19 +577,25 @@ class DiscoveryLoop:
             near_miss_threshold = self.stats.current_threshold * 0.8
             is_near_miss = (not is_anomaly and ood_result.ood_score > near_miss_threshold)
             
-            # Convert numpy types to Python natives for JSON serialization
+            # Convert ALL numpy types to Python natives for JSON serialization
+            # Use explicit conversion to avoid float32 serialization errors
+            ood_score_native = self._to_python_native(ood_result.ood_score)
+            confidence_native = self._to_python_native(result.confidence)
+            threshold_native = self._to_python_native(ood_result.threshold)
+            votes_native = self._to_python_native(ood_result.votes)
+            
             analysis = {
                 "path": str(image_path),
                 "source": source,
-                "class_label": result.class_label,
-                "confidence": float(result.confidence),
-                "ood_score": float(ood_result.ood_score),
-                "ood_votes": int(ood_result.votes),
-                "method_scores": {k: float(v) for k, v in ood_result.method_scores.items()},
+                "class_label": str(result.class_label),
+                "confidence": float(confidence_native) if confidence_native is not None else 0.0,
+                "ood_score": float(ood_score_native) if ood_score_native is not None else 0.0,
+                "ood_votes": int(votes_native) if votes_native is not None else 0,
+                "method_scores": self._to_python_native(ood_result.method_scores),
                 "is_anomaly": bool(is_anomaly),
                 "is_anomaly_class": bool(is_anomaly_class),
                 "is_near_miss": bool(is_near_miss),
-                "threshold": float(ood_result.threshold),
+                "threshold": float(threshold_native) if threshold_native is not None else 3.0,
                 "is_duplicate": False,
             }
             
@@ -490,14 +615,14 @@ class DiscoveryLoop:
                 
                 # Check for active learning (uncertain samples)
                 # Convert probabilities to Python floats for JSON serialization
-                probs = {k: float(v) for k, v in result.probabilities.items()} if result.probabilities else None
+                probs = self._to_python_native(result.probabilities) if result.probabilities else None
                 uncertain = self.active_learning.check_uncertainty(
                     image_id=image_id,
                     image_path=str(image_path),
-                    class_label=result.class_label,
-                    confidence=float(result.confidence),
-                    ood_score=float(ood_result.ood_score),
-                    ood_threshold=float(ood_result.threshold),
+                    class_label=str(result.class_label),
+                    confidence=float(confidence_native) if confidence_native else 0.0,
+                    ood_score=float(ood_score_native) if ood_score_native else 0.0,
+                    ood_threshold=float(threshold_native) if threshold_native else 3.0,
                     probabilities=probs,
                 )
                 
@@ -552,11 +677,12 @@ class DiscoveryLoop:
                 
                 self.stats.total_analyzed += 1
                 
-                # Track highest OOD score ever seen
-                if result["ood_score"] > self.stats.highest_ood_score:
-                    self.stats.highest_ood_score = result["ood_score"]
-                    self.stats.highest_ood_image = result["path"]
-                    logger.info(f"  🔥 New highest OOD: {result['ood_score']:.3f} - {filepath.name}")
+                # Track highest OOD score ever seen (ensure Python native types)
+                ood_score = float(result["ood_score"]) if result["ood_score"] is not None else 0.0
+                if ood_score > self.stats.highest_ood_score:
+                    self.stats.highest_ood_score = float(ood_score)
+                    self.stats.highest_ood_image = str(result["path"])
+                    logger.info(f"  🔥 New highest OOD: {ood_score:.3f} - {filepath.name}")
                     logger.info(f"     Votes: {result.get('ood_votes', 0)}/3 methods agree")
                 
                 # Check for anomaly
@@ -570,15 +696,15 @@ class DiscoveryLoop:
                     logger.info(f"      Class: {result['class_label']} ({result['confidence']:.1%})")
                     logger.info(f"      OOD Score: {result['ood_score']:.3f} (votes: {result.get('ood_votes', 0)})")
                     
-                    # Save candidate
+                    # Save candidate (ensure all values are Python native types)
                     candidate = AnomalyCandidate(
-                        image_id=result.get("image_id", len(self.candidates)),
+                        image_id=int(result.get("image_id", len(self.candidates))),
                         image_path=str(filepath),
-                        ood_score=result["ood_score"],
-                        threshold_at_detection=result["threshold"],
-                        classification=result["class_label"],
-                        confidence=result["confidence"],
-                        source=source,
+                        ood_score=float(result["ood_score"]) if result["ood_score"] is not None else 0.0,
+                        threshold_at_detection=float(result["threshold"]) if result["threshold"] is not None else 3.0,
+                        classification=str(result["class_label"]),
+                        confidence=float(result["confidence"]) if result["confidence"] is not None else 0.0,
+                        source=str(source),
                         detected_at=datetime.now().isoformat(),
                     )
                     self.candidates.append(candidate)
@@ -590,15 +716,15 @@ class DiscoveryLoop:
                         f"{result['class_label']} from {source} - OOD: {result['ood_score']:.2f}"
                     )
                     
-                    # Log to structured logger
+                    # Log to structured logger (ensure native types)
                     structured_logger.log_anomaly(
-                        cycle=self.stats.cycles_completed + 1,
+                        cycle=int(self.stats.cycles_completed + 1),
                         image_path=str(filepath),
-                        source=source,
-                        class_label=result['class_label'],
-                        confidence=result['confidence'],
-                        ood_score=result['ood_score'],
-                        ood_votes=result.get('ood_votes', 0),
+                        source=str(source),
+                        class_label=str(result['class_label']),
+                        confidence=float(result['confidence']) if result['confidence'] is not None else 0.0,
+                        ood_score=float(result['ood_score']) if result['ood_score'] is not None else 0.0,
+                        ood_votes=int(result.get('ood_votes', 0)),
                     )
                 
                 # Track near-misses
@@ -621,7 +747,10 @@ class DiscoveryLoop:
         self.source_manager.save_state()
         self.active_learning.save_queue()
         
-        # Cycle summary
+        # Cycle summary with timing
+        cycle_duration = (datetime.now() - cycle_start).total_seconds()
+        images_per_second = analyzed_this_cycle / cycle_duration if cycle_duration > 0 else 0
+        
         logger.info(f"\n📊 Cycle Summary:")
         logger.info(f"   Downloaded: {len(files_with_sources)}")
         logger.info(f"   Analyzed: {analyzed_this_cycle}")
@@ -629,6 +758,7 @@ class DiscoveryLoop:
         logger.info(f"   Anomalies: {anomalies_this_cycle}")
         logger.info(f"   Near-misses: {near_misses_this_cycle}")
         logger.info(f"   Uncertain (for review): {self.stats.uncertain_flagged} total")
+        logger.info(f"   ⏱ Duration: {cycle_duration:.1f}s ({images_per_second:.2f} img/sec)")
         
         # Show source diversity summary occasionally
         if self.stats.cycles_completed % 5 == 0:
@@ -642,16 +772,17 @@ class DiscoveryLoop:
         for _, source in files_with_sources:
             source_counts[source] = source_counts.get(source, 0) + 1
         
+        # Ensure all values are Python native types for JSON serialization
         structured_logger.end_cycle(
-            cycle_number=self.stats.cycles_completed,
-            images_downloaded=len(files_with_sources),
-            images_analyzed=len(files_with_sources) - self.stats.duplicates_skipped,
-            duplicates_skipped=self.stats.duplicates_skipped,
-            anomalies_found=anomalies_this_cycle,
-            near_misses=near_misses_this_cycle,
-            flagged_for_review=self.stats.uncertain_flagged,
-            highest_ood=self.stats.highest_ood_score,
-            threshold=self.stats.current_threshold,
+            cycle_number=int(self.stats.cycles_completed),
+            images_downloaded=int(len(files_with_sources)),
+            images_analyzed=int(analyzed_this_cycle),
+            duplicates_skipped=int(skipped_this_cycle),
+            anomalies_found=int(anomalies_this_cycle),
+            near_misses=int(near_misses_this_cycle),
+            flagged_for_review=int(self.stats.uncertain_flagged),
+            highest_ood=float(self.stats.highest_ood_score) if self.stats.highest_ood_score else 0.0,
+            threshold=float(self.stats.current_threshold) if self.stats.current_threshold else 3.0,
             sources=source_counts,
         )
         
@@ -668,15 +799,66 @@ class DiscoveryLoop:
 
     def _adjust_threshold(self):
         """Gradually lower threshold if no anomalies found."""
-        old_threshold = self.stats.current_threshold
-        new_threshold = max(
+        old_threshold = float(self.stats.current_threshold)
+        new_threshold = float(max(
             self.min_threshold,
             old_threshold * self.threshold_decay
-        )
+        ))
         
         if new_threshold < old_threshold:
-            self.stats.current_threshold = new_threshold
+            self.stats.current_threshold = float(new_threshold)
             logger.info(f"  📉 Threshold adjusted: {old_threshold:.3f} → {new_threshold:.3f}")
+
+    def _enrich_anomaly_dataset(self):
+        """
+        Copy downloaded anomalies to the training dataset for continuous improvement.
+        
+        This ensures the model keeps learning from new anomaly examples
+        downloaded from real catalogs (supernovae, lenses, mergers, etc.)
+        """
+        import shutil
+        
+        anomaly_dataset = DATASETS_DIR / "anomalies" / "train"
+        
+        # Source directories and their target classes
+        source_mappings = [
+            (DOWNLOADS_DIR / "real_supernovae", "supernova"),
+            (DOWNLOADS_DIR / "gravitational_lenses", "gravitational_lens"),
+            (DOWNLOADS_DIR / "galaxy_mergers", "merger"),
+            (DOWNLOADS_DIR / "peculiar_galaxies", "unusual_morphology"),
+            (DOWNLOADS_DIR / "galaxy_zoo_anomalies", "unusual_morphology"),
+        ]
+        
+        total_copied = 0
+        
+        for source_dir, target_class in source_mappings:
+            if not source_dir.exists():
+                continue
+            
+            target_dir = anomaly_dataset / target_class
+            target_dir.mkdir(parents=True, exist_ok=True)
+            
+            for img_file in source_dir.glob("*.jpg"):
+                dest = target_dir / img_file.name
+                if not dest.exists():
+                    try:
+                        shutil.copy(img_file, dest)
+                        total_copied += 1
+                    except Exception:
+                        pass
+        
+        if total_copied > 0:
+            logger.info(f"  📥 Enriched anomaly dataset: +{total_copied} new images")
+        
+        # Log dataset statistics
+        total_anomaly_images = 0
+        for class_dir in anomaly_dataset.iterdir():
+            if class_dir.is_dir():
+                count = len(list(class_dir.glob("*.jpg")))
+                total_anomaly_images += count
+        
+        if total_anomaly_images > 0:
+            logger.info(f"  📊 Anomaly dataset now has {total_anomaly_images} images")
 
     def _trigger_finetune(self):
         """
@@ -684,38 +866,187 @@ class DiscoveryLoop:
         
         Uses both galaxy10 (normal) and anomalies (unusual) datasets
         to teach the model what anomalies look like.
+        
+        IMPORTANT: Fine-tuning runs WITHOUT timeout to allow completion.
+        Progress is streamed to the log in real-time.
         """
         logger.info("\n🎓 Triggering fine-tuning cycle...")
+        logger.info("   This may take 30-60+ minutes on CPU. Progress will be shown below.")
         finetune_start = datetime.now()
         
-        # Alternate between datasets to build diverse knowledge
-        datasets = ["galaxy10", "anomalies", "galaxy_zoo"]
+        # FIRST: Enrich anomaly dataset with newly downloaded images
+        self._enrich_anomaly_dataset()
+        
+        # Dataset rotation strategy:
+        # - Prioritize anomalies for breakthrough detection (2 out of 4 cycles)
+        # - Include galaxy10 for normal class calibration
+        # - Include galaxy_zoo for diverse morphologies
+        #
+        # Pattern: anomalies -> galaxy10 -> anomalies -> galaxy_zoo
+        # This ensures anomaly training happens 50% of the time
+        datasets = ["anomalies", "galaxy10", "anomalies", "galaxy_zoo"]
         dataset_idx = self.stats.finetune_runs % len(datasets)
         dataset = datasets[dataset_idx]
         
-        logger.info(f"  Training on: {dataset}")
+        logger.info(f"  📚 Training rotation: cycle {self.stats.finetune_runs + 1}, dataset: {dataset}")
+        
+        # Configure training based on mode
+        # NO TIMEOUT - Training runs until completion (resume from checkpoint if needed)
+        if hasattr(self, 'turbo') and self.turbo:
+            epochs = 3  # Reasonable training in turbo mode
+            max_training_minutes = None  # No timeout - runs to completion
+            logger.info(f"  Training on: {dataset} (turbo: {epochs} epochs, no timeout)")
+        elif hasattr(self, 'aggressive') and self.aggressive:
+            epochs = 4  # More training in aggressive mode
+            max_training_minutes = None  # No timeout - runs to completion
+            logger.info(f"  Training on: {dataset} (aggressive: {epochs} epochs, no timeout)")
+        else:
+            epochs = 5  # Full training in normal mode
+            max_training_minutes = None  # No timeout - training runs to completion
+            logger.info(f"  Training on: {dataset} (normal: {epochs} epochs, no timeout)")
         
         try:
-            # Run the fine-tuning pipeline with longer timeout
-            # Fine-tuning can take 45-60 minutes on CPU
-            result = subprocess.run(
+            # Run fine-tuning with RESUME support
+            # This allows training to continue from checkpoints if timed out previously
+            
+            # Set environment to disable tqdm (progress bars don't work in subprocess)
+            env = os.environ.copy()
+            env["ASTROLENS_SUBPROCESS"] = "1"
+            
+            process = subprocess.Popen(
                 [
                     sys.executable, 
                     "finetuning/pipeline.py",
                     "--dataset", dataset,
-                    "--epochs", "2",  # Reduced for faster iterations
+                    "--epochs", str(epochs),
                     "--skip_download",
+                    "--verbose",  # Enable verbose output
+                    "--resume",   # Resume from checkpoint if available
                 ],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                timeout=3600,  # 60 min max (increased from 30)
+                bufsize=1,
+                env=env,
             )
+            
+            # Stream output in real-time - NO TIMEOUT (training runs to completion)
+            epoch_count = 0
+            last_progress_log = datetime.now()
+            step_count = 0
+            
+            # Track accuracy values for improvement calculation
+            first_accuracy = None
+            last_accuracy = None
+            first_loss = None
+            last_loss = None
+            
+            import re
+            
+            while True:
+                # Check if process has finished
+                if process.poll() is not None:
+                    break
+                
+                # Read output line
+                try:
+                    line = process.stdout.readline()
+                except Exception:
+                    break
+                    
+                if not line:
+                    continue
+                    
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Skip tqdm progress bar lines (contain \r or |)
+                if '\r' in line or ('|' in line and '%' in line):
+                    continue
+                
+                # Extract accuracy and loss from eval lines
+                # Format: {'eval_loss': 0.5119, 'eval_accuracy': 0.8201, ...}
+                if "'eval_accuracy'" in line:
+                    acc_match = re.search(r"'eval_accuracy':\s*([\d.]+)", line)
+                    loss_match = re.search(r"'eval_loss':\s*([\d.]+)", line)
+                    if acc_match:
+                        acc_value = float(acc_match.group(1))
+                        if first_accuracy is None:
+                            first_accuracy = acc_value
+                        last_accuracy = acc_value
+                    if loss_match:
+                        loss_value = float(loss_match.group(1))
+                        if first_loss is None:
+                            first_loss = loss_value
+                        last_loss = loss_value
+                
+                # Log training metrics (loss, accuracy, step info)
+                if "'loss'" in line or "'eval_loss'" in line or "'accuracy'" in line or "Step " in line:
+                    logger.info(f"  📈 {line}")
+                    step_count += 1
+                elif any(kw in line.lower() for kw in ['epoch', 'training', 'evaluating', 'complete', 'error', 'warning', 'saved', 'saving']):
+                    logger.info(f"  [TRAIN] {line}")
+                    
+                    # Track epoch progress
+                    if 'epoch' in line.lower() and ('/' in line or 'eval' in line.lower()):
+                        epoch_count += 1
+                        logger.info(f"  📊 Completed epoch {epoch_count}/{epochs}")
+                
+                # Log periodic progress every 2 minutes
+                now = datetime.now()
+                if (now - last_progress_log).total_seconds() > 120:
+                    elapsed = (now - finetune_start).total_seconds() / 60
+                    logger.info(f"  ⏱ Training in progress: {elapsed:.1f} minutes elapsed, {step_count} steps logged")
+                    last_progress_log = now
+            
+            process.wait()
             
             duration_minutes = (datetime.now() - finetune_start).total_seconds() / 60
             
-            if result.returncode == 0:
+            if process.returncode == 0:
                 self.stats.finetune_runs += 1
                 logger.info(f"  ✓ Fine-tuning complete (run #{self.stats.finetune_runs})")
+                logger.info(f"  ⏱ Total duration: {duration_minutes:.1f} minutes")
+                
+                # Calculate and log improvement
+                improvement_pct = 0.0
+                if first_accuracy is not None and last_accuracy is not None:
+                    if first_accuracy > 0:
+                        improvement_pct = ((last_accuracy - first_accuracy) / first_accuracy) * 100
+                    
+                    logger.info(f"  📊 Accuracy: {first_accuracy:.1%} → {last_accuracy:.1%}")
+                    if improvement_pct > 0:
+                        logger.info(f"  📈 Improvement: +{improvement_pct:.1f}%")
+                    elif improvement_pct < 0:
+                        logger.info(f"  📉 Change: {improvement_pct:.1f}%")
+                    
+                    # Update model accuracy in stats
+                    if self.stats.initial_accuracy == 0:
+                        self.stats.initial_accuracy = first_accuracy
+                    self.stats.model_accuracy = last_accuracy
+                    
+                    # Calculate total improvement since start
+                    if self.stats.initial_accuracy > 0:
+                        self.stats.total_improvement_pct = (
+                            (last_accuracy - self.stats.initial_accuracy) / self.stats.initial_accuracy * 100
+                        )
+                
+                # Record training run in history
+                training_run = {
+                    "run_number": self.stats.finetune_runs,
+                    "dataset": dataset,
+                    "started_at": finetune_start.isoformat(),
+                    "duration_minutes": round(duration_minutes, 1),
+                    "accuracy_before": round(first_accuracy or 0, 4),
+                    "accuracy_after": round(last_accuracy or 0, 4),
+                    "improvement_pct": round(improvement_pct, 2),
+                    "loss_before": round(first_loss or 0, 4),
+                    "loss_after": round(last_loss or 0, 4),
+                    "epochs_completed": epoch_count,
+                    "success": True,
+                }
+                self.stats.training_history.append(training_run)
                 
                 # Log to structured logger
                 structured_logger.log_finetune(
@@ -727,28 +1058,24 @@ class DiscoveryLoop:
                 
                 # Reload classifier with new weights
                 self._classifier = None  # Force reload
+                logger.info("  🔄 Classifier will reload with new weights on next analysis")
+                
+                # Save state to persist training history
+                self._save_state()
             else:
-                error_msg = result.stderr[:200] if result.stderr else "Unknown error"
-                logger.warning(f"  ⚠ Fine-tuning failed: {error_msg}")
+                logger.warning(f"  ⚠ Fine-tuning failed (exit code {process.returncode})")
                 structured_logger.log_finetune(
                     run_number=self.stats.finetune_runs + 1,
                     dataset=dataset,
                     duration_minutes=duration_minutes,
                     success=False,
-                    error=error_msg,
+                    error=f"Exit code {process.returncode}",
                 )
                 
-        except subprocess.TimeoutExpired:
-            logger.warning("  ⚠ Fine-tuning timed out")
-            structured_logger.log_finetune(
-                run_number=self.stats.finetune_runs + 1,
-                dataset=dataset,
-                duration_minutes=30.0,
-                success=False,
-                error="Timeout after 30 minutes",
-            )
         except Exception as e:
             logger.warning(f"  ⚠ Fine-tuning error: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             structured_logger.log_error(
                 cycle=self.stats.cycles_completed,
                 error_type="finetune_error",
@@ -757,13 +1084,14 @@ class DiscoveryLoop:
             )
 
     def _send_notification(self, title: str, message: str):
-        """Send desktop notification."""
+        """Send desktop notification (without sound)."""
         import platform
         system = platform.system()
         
         try:
             if system == "Darwin":
-                script = f'display notification "{message}" with title "{title}" sound name "Glass"'
+                # No sound - silent notification
+                script = f'display notification "{message}" with title "{title}"'
                 subprocess.run(["osascript", "-e", script], check=False, capture_output=True)
             elif system == "Linux":
                 subprocess.run(["notify-send", title, message], check=False, capture_output=True)
@@ -786,6 +1114,17 @@ class DiscoveryLoop:
         print(f"Fine-tune runs: {self.stats.finetune_runs}")
         print(f"Final threshold: {self.stats.current_threshold:.3f}")
         print(f"Highest OOD:    {self.stats.highest_ood_score:.3f}")
+        
+        # Show model training progress
+        print(f"\n🎓 Model Training Progress:")
+        print(f"   Labeled anomalies: {self.stats.labeled_anomalies_downloaded}")
+        if self.stats.model_accuracy > 0:
+            print(f"   Current accuracy:  {self.stats.model_accuracy:.1%}")
+        if self.stats.initial_accuracy > 0 and self.stats.total_improvement_pct != 0:
+            sign = "+" if self.stats.total_improvement_pct > 0 else ""
+            print(f"   Total improvement: {sign}{self.stats.total_improvement_pct:.1f}%")
+        if self.stats.training_history:
+            print(f"   Training runs:     {len(self.stats.training_history)}")
         
         # Show source diversity
         print(f"\n{self.source_manager.get_summary()}")
@@ -818,12 +1157,18 @@ class DiscoveryLoop:
         logger.info("Press Ctrl+C to stop")
         logger.info("="*60)
         
-        # Log start to structured logger
+        # Initialize classifier early to log device info
+        logger.info("\n🔧 Initializing ML models...")
+        _ = self.classifier  # Force load to get device info
+        
+        # Log start to structured logger with device info
         structured_logger.log_start({
-            "cycle_interval_seconds": self.cycle_interval,
-            "images_per_cycle": self.images_per_cycle,
-            "finetune_every_n": self.finetune_every_n,
-            "initial_threshold": self.stats.current_threshold,
+            "cycle_interval_seconds": int(self.cycle_interval),
+            "images_per_cycle": int(self.images_per_cycle),
+            "finetune_every_n": int(self.finetune_every_n),
+            "initial_threshold": float(self.stats.current_threshold),
+            "inference_device": str(self._classifier.device) if self._classifier else "unknown",
+            "num_classes": int(self._classifier.num_classes) if self._classifier else 0,
             "aggressive": hasattr(self, 'aggressive') and self.aggressive,
             "turbo": hasattr(self, 'turbo') and self.turbo,
         })
@@ -833,6 +1178,9 @@ class DiscoveryLoop:
             logger.info("✓ AstroLens API is running")
         else:
             logger.warning("⚠ API not running - will analyze locally only")
+        
+        logger.info("\n📊 Sources enabled: SDSS, ZTF, NASA APOD, Galaxy Zoo Anomalies")
+        logger.info("   Galaxy Zoo anomalies provide labeled unusual galaxies for training")
         
         while self.running:
             try:

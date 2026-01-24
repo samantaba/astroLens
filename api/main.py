@@ -158,7 +158,7 @@ async def get_statistics(db: Session = Depends(get_db)):
 @app.get("/images", response_model=List[ImageSummary])
 async def list_images(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=2000),
+    limit: int = Query(100, ge=1, le=10000),  # Increased for batch operations
     anomaly_only: bool = Query(False),
     db: Session = Depends(get_db),
 ):

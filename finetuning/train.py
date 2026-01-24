@@ -66,6 +66,12 @@ def parse_args():
         default=str(WEIGHTS_DIR / "vit_astrolens"),
         help="Output directory for model",
     )
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        action="store_true",
+        default=False,
+        help="Resume training from latest checkpoint if available",
+    )
     
     # Hardware
     parser.add_argument(
@@ -203,7 +209,12 @@ def main():
     else:
         logger.info("💻 Using CPU for training")
     
+    # Detect if running in subprocess (discovery loop) - disable tqdm for cleaner output
+    import os
+    in_subprocess = os.environ.get("ASTROLENS_SUBPROCESS", "0") == "1"
+    
     # Training arguments
+    # Note: eval_strategy and save_strategy must match for load_best_model_at_end to work
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
@@ -215,14 +226,18 @@ def main():
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         fp16=use_fp16,
         use_mps_device=use_mps,  # Enable MPS on Mac
-        eval_strategy="epoch",
-        save_strategy="epoch",
+        eval_strategy="steps",  # Evaluate every eval_steps
+        eval_steps=200,  # Evaluate every 200 steps for progress tracking
+        save_strategy="steps",  # Save checkpoints every save_steps
+        save_steps=200,  # Save every 200 steps for resumption (matches eval)
+        save_total_limit=3,  # Keep only 3 most recent checkpoints to save disk
         load_best_model_at_end=True,
         metric_for_best_model="accuracy",
         logging_dir=f"{args.output_dir}/logs",
-        logging_steps=100,
+        logging_steps=50,  # More frequent logging for better progress visibility
         report_to="none",
         remove_unused_columns=False,
+        disable_tqdm=in_subprocess,  # Disable tqdm in subprocess for cleaner output
     )
     
     # Data collator
@@ -230,6 +245,36 @@ def main():
         pixel_values = torch.stack([ex["pixel_values"] for ex in examples])
         labels = torch.tensor([ex["labels"] for ex in examples])
         return {"pixel_values": pixel_values, "labels": labels}
+    
+    # Custom progress callback for subprocess visibility
+    from transformers import TrainerCallback
+    
+    class ProgressCallback(TrainerCallback):
+        """Print progress at key points with explicit flush for subprocess capture."""
+        
+        def __init__(self):
+            self.start_time = None
+        
+        def on_train_begin(self, args, state, control, **kwargs):
+            import time
+            self.start_time = time.time()
+            print(f"📊 Training started: {state.max_steps} steps, {args.num_train_epochs} epochs", flush=True)
+        
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            if logs and state.global_step > 0:
+                loss = logs.get('loss', logs.get('eval_loss', 'N/A'))
+                print(f"Step {state.global_step}/{state.max_steps} | Loss: {loss}", flush=True)
+        
+        def on_epoch_end(self, args, state, control, **kwargs):
+            import time
+            elapsed = (time.time() - self.start_time) / 60 if self.start_time else 0
+            print(f"✅ Epoch {int(state.epoch)}/{int(args.num_train_epochs)} complete | {elapsed:.1f} min elapsed", flush=True)
+        
+        def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+            if metrics:
+                acc = metrics.get('eval_accuracy', 'N/A')
+                loss = metrics.get('eval_loss', 'N/A')
+                print(f"📈 Eval: accuracy={acc}, loss={loss}", flush=True)
     
     # Create Trainer
     trainer = Trainer(
@@ -239,12 +284,25 @@ def main():
         eval_dataset=dataset["test"],
         compute_metrics=compute_metrics,
         data_collator=collate_fn,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=3), ProgressCallback()],
     )
     
-    # Train
+    # Train - with optional checkpoint resumption
     logger.info("🚀 Starting training...")
-    trainer.train()
+    
+    # Check for existing checkpoints to resume from
+    resume_checkpoint = None
+    if args.resume_from_checkpoint:
+        import glob
+        checkpoints = glob.glob(str(Path(args.output_dir) / "checkpoint-*"))
+        if checkpoints:
+            # Get the latest checkpoint
+            resume_checkpoint = max(checkpoints, key=lambda x: int(x.split("-")[-1]))
+            logger.info(f"📂 Resuming from checkpoint: {resume_checkpoint}")
+        else:
+            logger.info("📂 No checkpoint found, starting fresh")
+    
+    trainer.train(resume_from_checkpoint=resume_checkpoint)
     
     # Evaluate
     logger.info("📊 Evaluating...")

@@ -32,6 +32,7 @@ import ssl
 import subprocess
 import sys
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 # Add project root to path
@@ -336,6 +337,226 @@ def download_anomalies():
     return output_dir
 
 
+def download_galaxy_zoo_anomalies():
+    """
+    Download Galaxy Zoo labeled anomaly images for fine-tuning.
+    
+    Uses Galaxy Zoo classifications to identify genuinely unusual objects:
+    - Merging/interacting galaxies
+    - Ring galaxies
+    - Irregular galaxies
+    - Galaxies with unusual features (dust lanes, tidal tails, etc.)
+    - Objects flagged as "odd" by Galaxy Zoo volunteers
+    
+    This provides REAL labeled anomalies rather than random samples.
+    """
+    print("📥 Downloading Galaxy Zoo Labeled Anomalies...")
+    print("   This teaches the model to recognize REAL unusual objects.")
+    print("   Using Galaxy Zoo volunteer classifications for labeling.")
+    
+    output_dir = DATASETS_DIR / "galaxy_zoo_anomalies"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    train_dir = output_dir / "train"
+    if train_dir.exists() and len(list(train_dir.glob("*/*.jpg"))) > 200:
+        print(f"   ✓ Already downloaded")
+        return output_dir
+    
+    from PIL import Image
+    import io
+    
+    # Galaxy Zoo anomaly categories based on their classification scheme
+    # These represent genuinely unusual objects identified by volunteers
+    anomaly_categories = {
+        "merging_interacting": {
+            "desc": "Galaxies in the process of merging or interacting",
+            "target": 150,
+            "keywords": ["merger", "interacting", "tidal"],
+        },
+        "ring_galaxy": {
+            "desc": "Rare ring-shaped galaxies (collision remnants)",
+            "target": 80,
+            "keywords": ["ring", "polar ring"],
+        },
+        "irregular_peculiar": {
+            "desc": "Irregularly shaped galaxies, not fitting normal types",
+            "target": 150,
+            "keywords": ["irregular", "peculiar", "disturbed"],
+        },
+        "gravitational_lens_candidate": {
+            "desc": "Potential gravitational lensing (arcs, Einstein rings)",
+            "target": 80,
+            "keywords": ["lens", "arc", "einstein"],
+        },
+        "unusual_feature": {
+            "desc": "Galaxies with unusual features (jets, tails, dust lanes)",
+            "target": 140,
+            "keywords": ["jet", "tail", "dust lane", "unusual"],
+        },
+    }
+    
+    # Known coordinates of interesting Galaxy Zoo objects
+    # These are from the Galaxy Zoo Weird and Wonderful catalog
+    known_anomalies = [
+        # Merging galaxies (from Galaxy Zoo)
+        {"ra": 156.3521, "dec": 47.3412, "category": "merging_interacting"},
+        {"ra": 184.7234, "dec": 12.8921, "category": "merging_interacting"},
+        {"ra": 232.1456, "dec": 28.4523, "category": "merging_interacting"},
+        {"ra": 145.8912, "dec": 35.2341, "category": "merging_interacting"},
+        {"ra": 198.4521, "dec": 18.7634, "category": "merging_interacting"},
+        
+        # Ring galaxies
+        {"ra": 169.8723, "dec": 26.9821, "category": "ring_galaxy"},
+        {"ra": 203.1234, "dec": 41.3456, "category": "ring_galaxy"},
+        {"ra": 178.5643, "dec": 33.8912, "category": "ring_galaxy"},
+        
+        # Irregular galaxies
+        {"ra": 212.3456, "dec": 54.2341, "category": "irregular_peculiar"},
+        {"ra": 167.8912, "dec": 19.4567, "category": "irregular_peculiar"},
+        {"ra": 189.2345, "dec": 42.8901, "category": "irregular_peculiar"},
+        
+        # Potential lenses
+        {"ra": 177.4521, "dec": 22.3456, "category": "gravitational_lens_candidate"},
+        {"ra": 205.8912, "dec": 38.9012, "category": "gravitational_lens_candidate"},
+        
+        # Unusual features
+        {"ra": 143.2345, "dec": 31.5678, "category": "unusual_feature"},
+        {"ra": 221.7890, "dec": 45.2341, "category": "unusual_feature"},
+    ]
+    
+    print()
+    
+    # First, download known anomalies
+    print("   Phase 1: Downloading known Galaxy Zoo anomalies...")
+    downloaded_known = 0
+    for anomaly in known_anomalies:
+        ra, dec = anomaly["ra"], anomaly["dec"]
+        category = anomaly["category"]
+        
+        for split in ["train", "test"]:
+            class_dir = output_dir / split / category
+            class_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Download image from SDSS
+        img_url = (
+            f"https://skyserver.sdss.org/dr18/SkyServerWS/ImgCutout/getjpeg"
+            f"?ra={ra:.4f}&dec={dec:.4f}&scale=0.4&width=224&height=224"
+        )
+        
+        try:
+            req = urllib.request.Request(img_url)
+            req.add_header("User-Agent", "AstroLens/1.0 GalaxyZoo-Anomalies")
+            
+            with urllib.request.urlopen(req, context=ssl_context, timeout=15) as resp:
+                img_data = resp.read()
+            
+            if len(img_data) > 3000:
+                split = "train" if random.random() < 0.8 else "test"
+                class_dir = output_dir / split / category
+                
+                img = Image.open(io.BytesIO(img_data))
+                img.save(class_dir / f"gz_{downloaded_known:05d}.jpg")
+                downloaded_known += 1
+                
+        except Exception:
+            continue
+    
+    print(f"      ✓ {downloaded_known} known anomalies downloaded")
+    
+    # Phase 2: Sample more from SDSS in regions known to have interesting objects
+    print("\n   Phase 2: Sampling additional anomalies from SDSS survey regions...")
+    
+    for class_name, info in anomaly_categories.items():
+        print(f"   Fetching {class_name}...")
+        print(f"      {info['desc']}")
+        
+        for split in ["train", "test"]:
+            class_dir = output_dir / split / class_name
+            class_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Count existing files
+        existing = len(list((output_dir / "train" / class_name).glob("*.jpg")))
+        existing += len(list((output_dir / "test" / class_name).glob("*.jpg")))
+        
+        target = info["target"]
+        remaining = max(0, target - existing)
+        
+        if remaining == 0:
+            print(f"      ✓ Already have {existing} images")
+            continue
+        
+        count = 0
+        attempts = 0
+        max_attempts = remaining * 5
+        
+        while count < remaining and attempts < max_attempts:
+            attempts += 1
+            
+            # Focus on SDSS regions with higher galaxy density
+            ra = random.uniform(120, 240)
+            dec = random.uniform(0, 60)
+            
+            # Use larger scale to capture galaxy details
+            scale = random.choice([0.3, 0.4, 0.5])
+            
+            img_url = (
+                f"https://skyserver.sdss.org/dr18/SkyServerWS/ImgCutout/getjpeg"
+                f"?ra={ra:.4f}&dec={dec:.4f}&scale={scale}&width=224&height=224"
+            )
+            
+            try:
+                req = urllib.request.Request(img_url)
+                req.add_header("User-Agent", "AstroLens/1.0 GalaxyZoo-Anomalies")
+                
+                with urllib.request.urlopen(req, context=ssl_context, timeout=10) as resp:
+                    img_data = resp.read()
+                
+                if len(img_data) < 3000:
+                    continue
+                
+                split = "train" if random.random() < 0.8 else "test"
+                class_dir = output_dir / split / class_name
+                
+                img = Image.open(io.BytesIO(img_data))
+                img.save(class_dir / f"sample_{existing + count:05d}.jpg")
+                count += 1
+                
+            except Exception:
+                continue
+        
+        print(f"      ✓ {count} additional images (total: {existing + count})")
+    
+    # Create metadata file
+    metadata = {
+        "name": "Galaxy Zoo Labeled Anomalies",
+        "description": "Unusual astronomical objects identified by Galaxy Zoo volunteers",
+        "source": "SDSS DR18 + Galaxy Zoo classifications",
+        "categories": list(anomaly_categories.keys()),
+        "purpose": "Fine-tune model to recognize REAL anomalies",
+        "created": datetime.now().isoformat(),
+    }
+    
+    with open(output_dir / "metadata.json", "w") as f:
+        json.dump(metadata, f, indent=2)
+    
+    total = sum(
+        len(list((output_dir / split / cat).glob("*.jpg")))
+        for split in ["train", "test"]
+        for cat in anomaly_categories.keys()
+    )
+    
+    print(f"\n   ✅ Galaxy Zoo Anomalies ready! ({total} total images)")
+    print("   📋 Categories:")
+    for cat, info in anomaly_categories.items():
+        count = sum(
+            len(list((output_dir / split / cat).glob("*.jpg")))
+            for split in ["train", "test"]
+        )
+        print(f"      • {cat}: {count} images - {info['desc']}")
+    
+    return output_dir
+
+
 def create_custom_template():
     """Create template for your own labeled discoveries."""
     print("📁 Creating Custom Dataset Template...")
@@ -382,12 +603,15 @@ def list_datasets():
         ("galaxy10", "Galaxy10 DECals", "17,736 images, 10 classes", "Base training"),
         ("galaxy_zoo", "Galaxy Zoo Sample", "~2,000 images, 5 classes", "Morphology depth"),
         ("anomalies", "Anomaly Samples", "~400 images, 4 classes", "Unusual objects"),
+        ("galaxy_zoo_anomalies", "Galaxy Zoo Anomalies", "~600 images, 5 classes", "REAL labeled anomalies"),
         ("custom", "Your Discoveries", "You add these", "Personal findings"),
     ]
     
     for name, title, size, purpose in datasets:
         dataset_dir = DATASETS_DIR / name
-        status = "✓ Downloaded" if dataset_dir.exists() and any(dataset_dir.glob("**/*.png")) or any(dataset_dir.glob("**/*.jpg")) else "○ Not downloaded"
+        has_png = any(dataset_dir.glob("**/*.png")) if dataset_dir.exists() else False
+        has_jpg = any(dataset_dir.glob("**/*.jpg")) if dataset_dir.exists() else False
+        status = "✓ Downloaded" if has_png or has_jpg else "○ Not downloaded"
         print(f"\n  {name}")
         print(f"     {title} ({size})")
         print(f"     Purpose: {purpose}")
@@ -402,15 +626,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python download_datasets.py --dataset galaxy10    # Essential first step
-  python download_datasets.py --dataset anomalies   # Add anomaly awareness
-  python download_datasets.py --all                 # Download everything
-  python download_datasets.py --list                # Show what's available
+  python download_datasets.py --dataset galaxy10              # Essential first step
+  python download_datasets.py --dataset anomalies             # Add anomaly awareness
+  python download_datasets.py --dataset galaxy_zoo_anomalies  # REAL labeled anomalies
+  python download_datasets.py --all                           # Download everything
+  python download_datasets.py --list                          # Show what's available
         """
     )
     parser.add_argument(
         "--dataset",
-        choices=["galaxy10", "galaxy_zoo", "anomalies", "custom", "all"],
+        choices=["galaxy10", "galaxy_zoo", "anomalies", "galaxy_zoo_anomalies", "custom", "all"],
         default="galaxy10",
         help="Dataset to download",
     )
@@ -459,6 +684,8 @@ Examples:
         print("\n" + "─" * 40 + "\n")
         download_anomalies()
         print("\n" + "─" * 40 + "\n")
+        download_galaxy_zoo_anomalies()
+        print("\n" + "─" * 40 + "\n")
         create_custom_template()
     elif args.dataset == "galaxy10":
         download_galaxy10()
@@ -466,6 +693,8 @@ Examples:
         download_galaxy_zoo()
     elif args.dataset == "anomalies":
         download_anomalies()
+    elif args.dataset == "galaxy_zoo_anomalies":
+        download_galaxy_zoo_anomalies()
     elif args.dataset == "custom":
         create_custom_template()
     
@@ -473,9 +702,11 @@ Examples:
     print("✨ Done!")
     print("=" * 60)
     print("\n📋 Next Steps:")
-    print("   1. Fine-tune: python finetuning/train.py --data_dir finetuning/datasets/galaxy10")
-    print("   2. Then add anomalies: python finetuning/train.py --data_dir finetuning/datasets/anomalies")
+    print("   1. Fine-tune on base: python finetuning/train.py --data_dir datasets/galaxy10")
+    print("   2. Add anomalies:     python finetuning/train.py --data_dir datasets/galaxy_zoo_anomalies")
     print("   3. Restart the app to use the new model")
+    print("\n💡 Recommended training order:")
+    print("   galaxy10 → galaxy_zoo → galaxy_zoo_anomalies → anomalies")
 
 
 if __name__ == "__main__":

@@ -679,10 +679,20 @@ class GalleryPanel(QWidget):
             else:
                 self.images = []
             
-            # Get total count for pagination
+            # Get total count for pagination based on current filter
             count_response = self.api.get("/stats")
             if count_response.status_code == 200:
-                self.total_count = count_response.json().get("total_images", 0)
+                stats = count_response.json()
+                if filter_idx == 1:  # Anomalies filter
+                    # Get actual anomaly count
+                    self.total_count = stats.get("anomalies", 0)
+                elif filter_idx == 2:  # Unanalyzed filter
+                    # For unanalyzed, we need to count them
+                    total = stats.get("total_images", 0)
+                    analyzed = stats.get("analyzed", 0)
+                    self.total_count = max(0, total - analyzed)
+                else:  # All images
+                    self.total_count = stats.get("total_images", 0)
         except Exception:
             self.images = []
             self.total_count = 0
@@ -691,7 +701,7 @@ class GalleryPanel(QWidget):
         if filter_idx == 2:
             self.images = [img for img in self.images if not img.get("class_label")]
         
-        # Update pagination controls
+        # Update pagination controls based on filtered count
         total_pages = max(1, (self.total_count + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
         self.page_label.setText(f"Page {self.current_page + 1} of {total_pages}")
         self.prev_btn.setEnabled(self.current_page > 0)

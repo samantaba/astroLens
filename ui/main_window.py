@@ -95,6 +95,10 @@ class MainWindow(QMainWindow):
         self.current_image_id: Optional[int] = None
         self.anomaly_count = 0
         
+        # Track gallery state for navigation
+        self._saved_gallery_page = 0
+        self._saved_gallery_scroll = 0
+        
         self._setup_ui()
         self._setup_statusbar()
         
@@ -369,6 +373,10 @@ class MainWindow(QMainWindow):
         self.content_stack.setCurrentIndex(idx)
 
     def _on_image_selected(self, image_id: int):
+        # Save gallery state before navigating to viewer
+        self._saved_gallery_page = self.gallery_panel.current_page
+        self._saved_gallery_scroll = self.gallery_panel.scroll_area.verticalScrollBar().value()
+        
         self.current_image_id = image_id
         self.viewer_panel.load_image(image_id)
         self.content_stack.setCurrentIndex(1)
@@ -377,7 +385,14 @@ class MainWindow(QMainWindow):
     def _show_gallery(self):
         self.content_stack.setCurrentIndex(0)
         self.nav_list.setCurrentRow(0)
-        self.gallery_panel.refresh()
+        
+        # Restore gallery state (page and scroll position)
+        self.gallery_panel.current_page = self._saved_gallery_page
+        self.gallery_panel.refresh(reset_page=False, preserve_selection=True)
+        
+        # Restore scroll position after a short delay to allow layout
+        QTimer.singleShot(100, lambda: self.gallery_panel.scroll_area.verticalScrollBar().setValue(self._saved_gallery_scroll))
+        
         self._update_stats()
 
     def _show_downloads(self):

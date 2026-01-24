@@ -77,8 +77,9 @@ SOURCES_CONFIG_PATH = DATA_DIR / "sources_config.json"
 WEIGHTS_DIR = Path(os.environ.get("WEIGHTS_DIR", ARTIFACTS_DIR / "weights"))
 WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Default fine-tuned model path
-WEIGHTS_PATH = os.environ.get("WEIGHTS_PATH", str(WEIGHTS_DIR / "vit_astrolens"))
+# Default fine-tuned model path (uses _latest symlink for auto-updates)
+# The _latest symlink is updated by the fine-tuning pipeline to point to the best model
+WEIGHTS_PATH = os.environ.get("WEIGHTS_PATH", str(WEIGHTS_DIR / "vit_astrolens_latest"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1,10 +1,20 @@
-# AstroLens
+<p align="center">
+  <img src="assets/logo.svg" alt="AstroLens" width="120" />
+</p>
 
-**AI-powered image analysis with ML classification, anomaly detection, and LLM-assisted insights.**
+<h1 align="center">AstroLens</h1>
 
-![Status](https://img.shields.io/badge/status-alpha-yellow)
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Python](https://img.shields.io/badge/python-3.10+-green)
+<p align="center">
+  <strong>Autonomous AI-powered astronomical image analysis with ML classification, ensemble anomaly detection, and continuous model improvement.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/status-beta-blue" alt="Status" />
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
+  <img src="https://img.shields.io/badge/python-3.10+-blue" alt="Python" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="Platform" />
+  <img src="https://img.shields.io/badge/GPU-Apple%20MPS%20%7C%20CUDA-orange" alt="GPU" />
+</p>
 
 ---
 
@@ -25,22 +35,44 @@ All processing runs **locally** – no cloud required. Optional LLM features wor
 
 ## Features
 
+### Core Capabilities
+
 | Feature | Description |
 |---------|-------------|
-| **Image Upload** | Support for FITS, PNG, JPEG. Drag-and-drop or browse. |
-| **ML Classification** | ViT-B/16 classifies into 10 galaxy morphology categories |
-| **Anomaly Detection** | **Ensemble OOD** with Energy, MSP, and Mahalanobis distance voting |
-| **Autonomous Discovery** | Background loop downloads, analyzes, and hunts for anomalies 24/7 |
-| **Fine-Tuning** | Continuous model improvement with rotating datasets |
-| **Embedding Search** | 768-dim vectors + FAISS for "find similar" |
-| **Duplicate Detection** | Perceptual hashing prevents duplicate images |
+| **ML Classification** | Fine-tuned ViT-B/16 classifies into 10 galaxy morphology categories |
+| **Ensemble Anomaly Detection** | Energy + MSP + Mahalanobis voting for robust OOD detection |
+| **Autonomous Discovery** | 24/7 background loop downloads, analyzes, and hunts for anomalies |
+| **Continuous Fine-Tuning** | Automatic model improvement with rotating datasets |
+| **Real Anomaly Ingestion** | Downloads verified supernovae, lenses, mergers from catalogs |
+| **Improvement Tracking** | Tracks model accuracy gains across training runs |
+
+### Image Management
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-Format Support** | FITS, PNG, JPEG with drag-and-drop or batch import |
+| **Embedding Search** | 768-dim FAISS vectors for "find similar" queries |
+| **Duplicate Detection** | Perceptual hashing prevents redundant images |
+| **Batch Analysis** | Analyze thousands of images with progress tracking |
 | **Active Learning** | Flags uncertain samples for human review |
-| **LLM Annotation** | GPT-4o or Ollama generates descriptions and hypotheses |
+
+### AI & Intelligence
+
+| Feature | Description |
+|---------|-------------|
+| **LLM Annotation** | GPT-4o or local Ollama generates descriptions |
 | **Chat Agent** | LangChain agent with tools: analyze, search, annotate, export |
-| **Desktop UI** | Elegant PyQt5 interface with dark theme |
-| **GPU Acceleration** | Apple MPS support for fast inference on Mac |
-| **Containerized** | Docker Compose for one-command startup |
-| **API-first** | FastAPI backend; UI is just a client |
+| **Hypothesis Generation** | AI suggests what anomalies might represent |
+
+### Technical
+
+| Feature | Description |
+|---------|-------------|
+| **Desktop UI** | Elegant PyQt5 interface with modern dark theme |
+| **GPU Acceleration** | Apple MPS (Mac) and CUDA (Linux/Windows) support |
+| **Containerized** | Docker Compose for one-command backend startup |
+| **API-first** | FastAPI backend; UI is a decoupled client |
+| **Local-first** | All ML runs locally; cloud LLM is optional |
 
 ---
 
@@ -133,22 +165,36 @@ python -m ui.main
 
 ## Autonomous Discovery Loop
 
-AstroLens includes an autonomous discovery system that continuously:
+AstroLens includes an autonomous discovery system that continuously hunts for astronomical anomalies 24/7:
 
-1. **Downloads** images from multiple sources (SDSS, ZTF, NASA APOD, ESO)
-2. **Analyzes** each image with ensemble OOD detection
-3. **Flags** potential anomalies for review
-4. **Fine-tunes** the model periodically to improve detection
+1. **Downloads** images from 8+ sources (SDSS, ZTF, NASA APOD, ESO, Galaxy Zoo, and more)
+2. **Ingests real anomalies** from verified catalogs (supernovae, gravitational lenses, galaxy mergers)
+3. **Analyzes** each image with ensemble OOD detection
+4. **Flags** potential anomalies for human review
+5. **Fine-tunes** the model continuously to improve detection
+6. **Tracks improvement** metrics across training runs
 
 ### Running the Discovery Loop
 
 ```bash
-# Start from UI: Settings → Discovery Loop → Start
+# Start from UI: Discovery Panel → Start Discovery
 
 # Or from command line:
-python scripts/discovery_loop.py --turbo  # Fast mode (no delays)
-python scripts/discovery_loop.py --aggressive  # Lower thresholds
+python scripts/discovery_loop.py                # Normal mode
+python scripts/discovery_loop.py --aggressive   # 30-sec cycles, lower thresholds
+python scripts/discovery_loop.py --turbo        # Maximum speed, 5-sec cycles
 ```
+
+### Real Anomaly Sources
+
+The discovery loop ingests **verified anomalies** from astronomical catalogs:
+
+| Source | Type | Description |
+|--------|------|-------------|
+| **IAU Transient Name Server** | Supernovae | Real confirmed supernova events |
+| **Master Lens Database** | Gravitational Lenses | Known strong lensing systems |
+| **Galaxy Zoo** | Mergers & Peculiar | Citizen-science classified oddities |
+| **SDSS Special Objects** | Various | Spectroscopically confirmed unusual objects |
 
 ### Ensemble Anomaly Detection
 
@@ -161,6 +207,15 @@ The detection system uses **3 complementary methods** that vote:
 | **Mahalanobis Distance** | Distance from known class distributions |
 
 An image is flagged as anomaly if **2+ methods agree** it's out-of-distribution.
+
+### Continuous Model Improvement
+
+The discovery loop tracks model performance across training runs:
+
+- **Accuracy tracking** before and after each fine-tuning run
+- **Improvement metrics** showing total gain since initial training  
+- **Training history** with per-run statistics
+- **Automatic dataset enrichment** from downloaded anomalies
 
 ---
 
@@ -201,32 +256,56 @@ OOD_THRESHOLD=10.0
 ```
 AstroLens/
 ├── api/                    # FastAPI backend
-│   ├── main.py             # App entry
-│   ├── routes/             # Endpoints
-│   ├── models.py           # Pydantic schemas
-│   └── db.py               # SQLite via SQLAlchemy
-├── inference/              # ML models
-│   ├── classifier.py       # ViT classifier
-│   ├── ood.py              # Anomaly detection
-│   └── embeddings.py       # FAISS vector store
-├── annotator/              # LLM layer
+│   ├── main.py             # REST API with all endpoints
+│   ├── models.py           # SQLAlchemy & Pydantic schemas
+│   └── db.py               # Database session management
+├── inference/              # ML inference layer
+│   ├── classifier.py       # ViT classification
+│   ├── ood.py              # Ensemble anomaly detection
+│   ├── embeddings.py       # FAISS similarity search
+│   ├── duplicates.py       # Perceptual hash deduplication
+│   └── active_learning.py  # Uncertainty sampling
+├── finetuning/             # Model training pipeline
+│   ├── train.py            # HuggingFace Trainer wrapper
+│   ├── download_datasets.py # Dataset acquisition
+│   ├── pipeline.py         # Automated training pipeline
+│   └── evaluate.py         # Model evaluation
+├── scripts/                # Automation scripts
+│   ├── discovery_loop.py   # Autonomous anomaly hunter
+│   ├── nightly_ingest.py   # Multi-source data ingestion
+│   └── download_weights.py # Model weight fetcher
+├── annotator/              # LLM annotation layer
 │   ├── prompts.py          # Prompt templates
 │   └── chain.py            # LangChain annotator
-├── agent/                  # LangChain agent
-│   ├── tools.py            # Agent tools
-│   └── agent.py            # Agent definition
-├── ui/                     # PyQt5 desktop app
+├── agent/                  # Conversational AI agent
+│   ├── tools.py            # Agent tools (analyze, search, etc.)
+│   └── agent.py            # LangChain agent definition
+├── ui/                     # PyQt5 desktop application
 │   ├── main.py             # Entry point
-│   ├── main_window.py      # Main window
-│   ├── gallery.py          # Image grid
-│   ├── viewer.py           # Detail view
-│   └── chat_panel.py       # LLM chat
-├── data/                   # Local storage (gitignored)
-├── weights/                # ML weights (gitignored)
+│   ├── main_window.py      # Main window with navigation
+│   ├── gallery.py          # Image grid with filtering
+│   ├── viewer.py           # Detail view with analysis
+│   ├── discovery_panel.py  # Discovery loop control
+│   ├── training_panel.py   # Fine-tuning UI
+│   └── chat_panel.py       # AI chat interface
+├── assets/                 # Static assets (logo, etc.)
 ├── docker-compose.yml      # Container orchestration
 ├── requirements.txt        # Python dependencies
 └── README.md               # This file
 ```
+
+---
+
+## What Makes AstroLens Special
+
+| Compared to... | AstroLens Advantage |
+|---------------|---------------------|
+| **Manual classification** | Autonomous 24/7 operation, analyzes images while you sleep |
+| **Single-method OOD** | Ensemble voting (3 methods) reduces false positives |
+| **Static models** | Continuous fine-tuning improves detection over time |
+| **Cloud-only tools** | Runs entirely locally; your data never leaves your machine |
+| **Black-box AI** | Full transparency: see confidence, OOD scores, similar images |
+| **One-shot analysis** | Active learning flags uncertain cases for human review |
 
 ---
 
