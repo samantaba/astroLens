@@ -234,11 +234,13 @@ class ResultRow(QFrame):
     
     verify_clicked = pyqtSignal(int, str)  # image_id, label
     view_clicked = pyqtSignal(str)  # url
+    image_clicked = pyqtSignal(str)  # filepath
     
     def __init__(self, result: dict):
         super().__init__()
         self.result = result
         self.image_id = result.get("image_id", 0)
+        self.filepath = result.get("image_path", "")
         
         is_known = result.get("is_known", False)
         
@@ -268,13 +270,28 @@ class ResultRow(QFrame):
         status_icon.setFixedWidth(24)
         layout.addWidget(status_icon)
         
-        # Image name
-        filepath = result.get("image_path", "")
-        name = Path(filepath).name if filepath else f"Image {self.image_id}"
-        name_label = QLabel(name)
-        name_label.setStyleSheet("color: #c8d0e0; font-size: 12px;")
-        name_label.setMinimumWidth(200)
-        layout.addWidget(name_label)
+        # Image name (clickable button to open)
+        name = Path(self.filepath).name if self.filepath else f"Image {self.image_id}"
+        name_btn = QPushButton(name)
+        name_btn.setToolTip(f"Click to open: {self.filepath}" if self.filepath else "No file path")
+        name_btn.setCursor(Qt.PointingHandCursor)
+        name_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #c8d0e0;
+                font-size: 12px;
+                text-align: left;
+                padding: 0;
+            }
+            QPushButton:hover {
+                color: #5b8def;
+                text-decoration: underline;
+            }
+        """)
+        name_btn.clicked.connect(self._open_image)
+        name_btn.setMinimumWidth(200)
+        layout.addWidget(name_btn)
         
         # Status
         status = result.get("status", "unknown")
@@ -361,6 +378,24 @@ class ResultRow(QFrame):
             """)
             fp_btn.clicked.connect(lambda: self.verify_clicked.emit(self.image_id, "false_positive"))
             layout.addWidget(fp_btn)
+    
+    def _open_image(self):
+        """Open the image file in the default viewer."""
+        import subprocess
+        import platform
+        
+        if not self.filepath or not Path(self.filepath).exists():
+            return
+        
+        try:
+            if platform.system() == "Darwin":  # macOS
+                subprocess.run(["open", self.filepath])
+            elif platform.system() == "Windows":
+                subprocess.run(["start", "", self.filepath], shell=True)
+            else:  # Linux
+                subprocess.run(["xdg-open", self.filepath])
+        except Exception as e:
+            print(f"Error opening image: {e}")
 
 
 class VerificationPanel(QWidget):
@@ -464,9 +499,9 @@ class VerificationPanel(QWidget):
         
         self.radius_spin = QSpinBox()
         self.radius_spin.setRange(10, 300)
-        self.radius_spin.setValue(60)  # 60 arcsec = 1 arcmin, good for galaxies
+        self.radius_spin.setValue(120)  # 120 arcsec = 2 arcmin, good coverage for galaxies
         self.radius_spin.setSuffix("″")  # arcsecond symbol
-        self.radius_spin.setToolTip("60″ = 1 arcmin (good for galaxies)\n120″ = 2 arcmin (for extended objects)")
+        self.radius_spin.setToolTip("120″ = 2 arcmin (good for galaxies)\n60″ = 1 arcmin (for compact objects)")
         self.radius_spin.setStyleSheet("""
             QSpinBox {
                 background: rgba(30, 40, 55, 0.8);

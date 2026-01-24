@@ -31,6 +31,7 @@ class ImageCreate(ImageBase):
 class ImageSummary(ImageBase):
     """Image summary for list views."""
     id: int
+    filepath: Optional[str] = None  # Added for cross-reference coordinate extraction
     class_label: Optional[str] = None
     class_confidence: Optional[float] = None
     ood_score: Optional[float] = None

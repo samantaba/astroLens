@@ -88,7 +88,7 @@ class CatalogCrossReference:
     
     def __init__(
         self,
-        search_radius_arcsec: float = 60.0,  # 60 arcsec = 1 arcmin (appropriate for galaxies)
+        search_radius_arcsec: float = 120.0,  # 120 arcsec = 2 arcmin (better coverage for galaxies)
         timeout_seconds: float = 30.0,
     ):
         self.search_radius = search_radius_arcsec

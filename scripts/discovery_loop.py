@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 
 import numpy as np
+import httpx
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
