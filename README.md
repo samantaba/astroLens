@@ -261,8 +261,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [NED](https://ned.ipac.caltech.edu/) for extragalactic data
 - [SDSS](https://www.sdss.org/) for galaxy survey data
 
----
+## Author
 
-<p align="center">
-  Made with ❤️ for astronomy enthusiasts and citizen scientists
-</p>
+**Saman Tabatabaeian**
+
+- Email: saman.tabatabaeian@gmail.com
+- LinkedIn: [linkedin.com/in/samantabatabaeian](https://www.linkedin.com/in/samantabatabaeian/)
