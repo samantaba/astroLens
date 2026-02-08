@@ -871,39 +871,53 @@ class DiscoveryPanel(QWidget):
                 
                 analyzed = 0
                 anomalies = 0
+                skipped = 0
+                errors = 0
                 
                 for i, img in enumerate(images):
                     image_id = img.get("id")
-                    ood_score = img.get("ood_score") or 0
+                    ood_score = img.get("ood_score")
                     filename = img.get("filename", "")
+                    
+                    # Skip images with no OOD score (never analyzed)
+                    if ood_score is None or ood_score == 0:
+                        skipped += 1
+                        if (i + 1) % 100 == 0:
+                            self.log_signal.emit(f"  Progress: {i+1}/{len(images)}")
+                        continue
                     
                     # Check if above threshold
                     is_anomaly = ood_score >= threshold
                     
                     # Update database
                     try:
-                        httpx.patch(
+                        resp = httpx.patch(
                             f"http://localhost:8000/images/{image_id}",
                             json={"is_anomaly": is_anomaly},
                             timeout=10.0,
                         )
+                        resp.raise_for_status()
                         
                         analyzed += 1
                         if is_anomaly:
                             anomalies += 1
                             if anomalies <= 20:  # Only log first 20
-                                self.log_signal.emit(f"  ✓ ANOMALY: {filename[:30]} (score={ood_score:.2f})")
-                    except:
-                        pass
+                                self.log_signal.emit(f"  ✓ ANOMALY: {filename[:40]} (score={ood_score:.3f})")
+                    except Exception as e:
+                        errors += 1
                     
                     # Progress every 100 images
                     if (i + 1) % 100 == 0:
-                        self.log_signal.emit(f"  Progress: {i+1}/{len(images)}")
+                        self.log_signal.emit(f"  Progress: {i+1}/{len(images)} (anomalies so far: {anomalies})")
                 
                 self.log_signal.emit(f"\n=== Batch Analysis Complete ===")
-                self.log_signal.emit(f"  Analyzed: {analyzed}")
-                self.log_signal.emit(f"  Anomalies: {anomalies}")
+                self.log_signal.emit(f"  Total images: {len(images)}")
+                self.log_signal.emit(f"  With OOD scores: {analyzed}")
+                self.log_signal.emit(f"  No OOD score (need Discovery): {skipped}")
+                self.log_signal.emit(f"  Anomalies flagged: {anomalies}")
                 self.log_signal.emit(f"  Rate: {anomalies/max(1,analyzed)*100:.1f}%")
+                if errors > 0:
+                    self.log_signal.emit(f"  Errors: {errors}")
                 self.log_signal.emit(f"\nGo to Verify tab to cross-reference anomalies!")
                 
             except Exception as e:
