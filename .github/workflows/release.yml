@@ -89,6 +89,12 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+          df -h /
+
       - uses: actions/checkout@v4
         with:
           lfs: true
@@ -200,7 +206,7 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: |
             ghcr.io/${{ github.repository_owner }}/astrolens:latest
             ghcr.io/${{ github.repository_owner }}/astrolens:${{ steps.version.outputs.tag }}
