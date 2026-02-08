@@ -581,6 +581,30 @@ class DiscoveryPanel(QWidget):
         self.start_btn.clicked.connect(self._toggle_discovery)
         controls.addWidget(self.start_btn)
         
+        # Batch Analyze button - runs OOD on existing images
+        self.batch_btn = QPushButton("🔬 Batch Analyze")
+        self.batch_btn.setToolTip("Run OOD detection on all existing images (no download)")
+        self.batch_btn.setCursor(Qt.PointingHandCursor)
+        self.batch_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(251, 191, 36, 0.2);
+                border: 1px solid rgba(251, 191, 36, 0.4);
+                border-radius: 10px;
+                padding: 12px 20px;
+                color: #fbbf24;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background: rgba(251, 191, 36, 0.3);
+            }
+            QPushButton:disabled {
+                background: rgba(60, 70, 90, 0.3);
+                color: #4a5568;
+            }
+        """)
+        self.batch_btn.clicked.connect(self._run_batch_analyze)
+        controls.addWidget(self.batch_btn)
+        
         # Verify button - opens verification panel
         self.verify_btn = QPushButton("🔍 Verify")
         self.verify_btn.setToolTip("Cross-reference anomalies against astronomical catalogs")
@@ -812,6 +836,87 @@ class DiscoveryPanel(QWidget):
         if not self.is_running:
             # Only update if discovery is not running (otherwise state file is source of truth)
             self.threshold_gauge.set_values(value, self.threshold_gauge.highest_ood)
+    
+    def _run_batch_analyze(self):
+        """Run OOD detection on all existing images (no download)."""
+        self.batch_btn.setEnabled(False)
+        self.batch_btn.setText("🔬 Analyzing...")
+        self._append_log("Starting batch OOD analysis...")
+        
+        # Run batch analyze in thread
+        def run_analysis():
+            try:
+                import httpx
+                import numpy as np
+                
+                # Get all images
+                response = httpx.get(
+                    "http://localhost:8000/images",
+                    params={"limit": 5000},
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                images = response.json()
+                
+                self.log_signal.emit(f"Found {len(images)} images")
+                
+                # Calculate threshold from existing scores (90th percentile)
+                scores = [d.get('ood_score', 0) or 0 for d in images if d.get('ood_score')]
+                if scores:
+                    threshold = np.percentile(scores, 90)
+                    self.log_signal.emit(f"Using threshold: {threshold:.3f} (top 10%)")
+                else:
+                    threshold = 0.45
+                    self.log_signal.emit(f"No scores yet, using default threshold: {threshold}")
+                
+                analyzed = 0
+                anomalies = 0
+                
+                for i, img in enumerate(images):
+                    image_id = img.get("id")
+                    ood_score = img.get("ood_score") or 0
+                    filename = img.get("filename", "")
+                    
+                    # Check if above threshold
+                    is_anomaly = ood_score >= threshold
+                    
+                    # Update database
+                    try:
+                        httpx.patch(
+                            f"http://localhost:8000/images/{image_id}",
+                            json={"is_anomaly": is_anomaly},
+                            timeout=10.0,
+                        )
+                        
+                        analyzed += 1
+                        if is_anomaly:
+                            anomalies += 1
+                            if anomalies <= 20:  # Only log first 20
+                                self.log_signal.emit(f"  ✓ ANOMALY: {filename[:30]} (score={ood_score:.2f})")
+                    except:
+                        pass
+                    
+                    # Progress every 100 images
+                    if (i + 1) % 100 == 0:
+                        self.log_signal.emit(f"  Progress: {i+1}/{len(images)}")
+                
+                self.log_signal.emit(f"\n=== Batch Analysis Complete ===")
+                self.log_signal.emit(f"  Analyzed: {analyzed}")
+                self.log_signal.emit(f"  Anomalies: {anomalies}")
+                self.log_signal.emit(f"  Rate: {anomalies/max(1,analyzed)*100:.1f}%")
+                self.log_signal.emit(f"\nGo to Verify tab to cross-reference anomalies!")
+                
+            except Exception as e:
+                self.log_signal.emit(f"Error: {e}")
+            
+            # Re-enable button
+            from PyQt5.QtCore import QMetaObject, Qt as QtCore_Qt, Q_ARG
+            QMetaObject.invokeMethod(self.batch_btn, "setEnabled", QtCore_Qt.QueuedConnection, Q_ARG(bool, True))
+            QMetaObject.invokeMethod(self.batch_btn, "setText", QtCore_Qt.QueuedConnection, Q_ARG(str, "🔬 Batch Analyze"))
+        
+        import threading
+        thread = threading.Thread(target=run_analysis, daemon=True)
+        thread.start()
     
     def _toggle_discovery(self):
         if self.is_running:

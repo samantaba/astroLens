@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <p class="subtitle">Galaxy Anomaly Discovery System</p>
+</div>
+
+<div class="card-grid cols-4" style="margin-bottom: 32px;">
+    <div class="stat-card">
+        <div class="value">{{ stats.get('total_images', 0) }}</div>
+        <div class="label">Total Images</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-emerald);">{{ stats.get('anomalies', 0) }}</div>
+        <div class="label">Anomalies Detected</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-purple);">{{ stats.get('analyzed', 0) }}</div>
+        <div class="label">Analyzed</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-amber);">{{ anomalies|length }}</div>
+        <div class="label">Top Candidates</div>
+    </div>
+</div>
+
+<div class="card-grid cols-2">
+    <div class="card">
+        <h3 style="font-size: 16px; font-weight: 500; margin-bottom: 16px;">🔭 Galaxy Mode</h3>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+            Find unusual galaxy morphologies using ViT + OOD ensemble detection.
+            Includes morphology analysis (CAS, Gini-M20) and catalog cross-reference.
+        </p>
+        <a href="/galaxy" class="btn btn-primary">Open Galaxy Mode</a>
+    </div>
+    
+    <div class="card">
+        <h3 style="font-size: 16px; font-weight: 500; margin-bottom: 16px;">🔬 Transient Mode</h3>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+            Detect transient events (supernovae, variable stars) using YOLO object detection.
+            Automated pipeline: Data Collection → Training → Integration.
+        </p>
+        <a href="/transient" class="btn btn-success">Open Transient Mode</a>
+    </div>
+</div>
+
+{% if anomalies %}
+<div class="card" style="margin-top: 24px;">
+    <h3 style="font-size: 16px; font-weight: 500; margin-bottom: 16px;">Recent Anomaly Candidates</h3>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Filename</th>
+                <th>Class</th>
+                <th>OOD Score</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in anomalies[:10] %}
+            <tr>
+                <td>#{{ a.get('id', '') }}</td>
+                <td>{{ a.get('filename', '')[:40] }}</td>
+                <td>{{ a.get('class_label', 'N/A') }}</td>
+                <td>{{ "%.3f"|format(a.get('ood_score', 0) or 0) }}</td>
+                <td><span class="badge badge-anomaly">Anomaly</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Export Results{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📊 Export Results</h1>
+    <p class="subtitle">Download analysis results in multiple formats</p>
+</div>
+
+<div class="card-grid cols-2">
+    <div class="card">
+        <h3 style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">📄 CSV Export</h3>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+            Spreadsheet-compatible format. Great for data analysis in Excel, Google Sheets, or Python pandas.
+        </p>
+        <button class="btn btn-primary" onclick="doExport('csv')">Export CSV</button>
+    </div>
+    
+    <div class="card">
+        <h3 style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">📋 JSON Export</h3>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+            Structured data format. Includes anomalies, stats, and cross-reference results. For programmatic access.
+        </p>
+        <button class="btn btn-primary" onclick="doExport('json')">Export JSON</button>
+    </div>
+    
+    <div class="card">
+        <h3 style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">🌐 HTML Report</h3>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+            Shareable web report with all results, stats, and visualizations. Open in any browser.
+        </p>
+        <button class="btn btn-primary" onclick="doExport('html')">Export HTML Report</button>
+    </div>
+    
+    <div class="card">
+        <h3 style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">🔭 VOTable Export</h3>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+            Astronomical standard format. Compatible with TOPCAT, Aladin, DS9, and other tools.
+        </p>
+        <button class="btn btn-primary" onclick="doExport('votable')">Export VOTable</button>
+    </div>
+</div>
+
+<div id="export-result" style="display: none; margin-top: 24px;" class="card">
+    <div id="export-message"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+async function doExport(format) {
+    const resultDiv = document.getElementById('export-result');
+    const msgDiv = document.getElementById('export-message');
+    
+    resultDiv.style.display = 'block';
+    msgDiv.innerHTML = '<p style="color: var(--text-secondary);">Exporting as ' + format.toUpperCase() + '...</p>';
+    
+    try {
+        const resp = await fetch('/api/export/' + format, { method: 'POST' });
+        const data = await resp.json();
+        
+        if (data.ok) {
+            msgDiv.innerHTML = `
+                <p style="color: var(--accent-emerald);">✓ Export complete!</p>
+                <p style="color: var(--text-secondary); font-size: 12px; margin-top: 8px;">
+                    Saved to: <code style="background: var(--bg-void); padding: 2px 6px; border-radius: 4px;">${data.path}</code>
+                </p>
+            `;
+        } else {
+            msgDiv.innerHTML = '<p style="color: var(--accent-rose);">Error: ' + (data.error || 'Unknown error') + '</p>';
+        }
+    } catch (e) {
+        msgDiv.innerHTML = '<p style="color: var(--accent-rose);">Failed: ' + e.message + '</p>';
+    }
+}
+</script>
+{% endblock %}

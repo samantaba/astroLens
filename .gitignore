@@ -10,7 +10,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
 develop-eggs/
 dist/
 eggs/
@@ -64,6 +63,9 @@ weights/
 
 # Fine-tuning datasets (very large!)
 finetuning/datasets/
+
+# Transient detector data (separate from main datasets)
+transient_data/
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Large Binary Files
@@ -151,6 +153,23 @@ Desktop.ini
 huggingface_hub/
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Build Artifacts (PyInstaller) - keep build scripts, ignore output
+# ─────────────────────────────────────────────────────────────────────────────
+build/dist/
+build/work/
+build/specs/*.spec
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Web Static (generated)
+# ─────────────────────────────────────────────────────────────────────────────
+web/static/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Exports
+# ─────────────────────────────────────────────────────────────────────────────
+exports/
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Misc
 # ─────────────────────────────────────────────────────────────────────────────
 *.bak
@@ -158,3 +177,5 @@ huggingface_hub/
 *.temp
 *~
 .scratch/
+runs/
+Ultralytics/

@@ -139,10 +139,21 @@ async def health_check():
     )
     return HealthResponse(
         status="ok",
-        version="0.1.0",
+        version="1.0.0",
         ml_model_loaded=ml_loaded,
         llm_available=llm_available,
     )
+
+
+@app.get("/device")
+async def device_info():
+    """Get GPU/compute device information."""
+    try:
+        from inference.gpu_utils import DeviceInfo
+        info = DeviceInfo.detect()
+        return info.to_dict()
+    except Exception as e:
+        return {"device_type": "cpu", "device_name": "Unknown", "error": str(e)}
 
 
 @app.get("/stats", response_model=StatsResponse)
@@ -546,7 +557,7 @@ async def chat(message: ChatMessage, db: Session = Depends(get_db)):
 @app.get("/candidates", response_model=List[ImageSummary])
 async def list_candidates(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(100, ge=1, le=5000),  # Increased for batch verification
     db: Session = Depends(get_db),
 ):
     """List anomaly candidates (is_anomaly=True), sorted by OOD score."""

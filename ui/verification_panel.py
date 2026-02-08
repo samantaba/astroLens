@@ -146,51 +146,64 @@ class CrossRefWorker(QThread):
 
 
 class CalibrateWorker(QThread):
-    """Background worker for OOD calibration."""
+    """Background worker for OOD calibration based on score distribution."""
     
     log = pyqtSignal(str)
     finished = pyqtSignal(bool, str)  # success, message
     
+    def __init__(self, api_base: str = "http://localhost:8000"):
+        super().__init__()
+        self.api_base = api_base
+    
     def run(self):
         try:
-            self.log.emit("Starting OOD detector calibration...")
+            import numpy as np
             
-            # Run the calibration via discovery loop
-            script_path = Path(__file__).parent.parent / "scripts" / "discovery_loop.py"
+            self.log.emit("Starting OOD threshold calibration...")
             
-            process = subprocess.Popen(
-                [sys.executable, str(script_path), "--calibrate", "--interval", "0", "--images", "1"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
+            # Get all images with OOD scores
+            response = httpx.get(
+                f"{self.api_base}/images",
+                params={"limit": 5000},
+                timeout=30.0,
             )
+            response.raise_for_status()
+            images = response.json()
             
-            # Read output for a few seconds then kill (calibration happens at start)
-            import time
-            start = time.time()
-            output_lines = []
+            # Extract scores
+            scores = [img.get("ood_score", 0) or 0 for img in images if img.get("ood_score")]
             
-            while time.time() - start < 30:  # Max 30 seconds
-                line = process.stdout.readline()
-                if not line:
-                    break
-                output_lines.append(line.strip())
-                self.log.emit(line.strip())
-                
-                # Check if calibration is done
-                if "Calibrated on" in line or "Calibration failed" in line:
-                    break
+            if not scores:
+                self.finished.emit(False, "No OOD scores found - run Batch Analyze first")
+                return
             
-            process.terminate()
-            process.wait(timeout=5)
+            self.log.emit(f"Found {len(scores)} images with OOD scores")
             
-            # Check for success
-            success = any("Calibrated on" in line for line in output_lines)
+            # Calculate statistics
+            scores_arr = np.array(scores)
+            mean_score = np.mean(scores_arr)
+            std_score = np.std(scores_arr)
+            p90 = np.percentile(scores_arr, 90)
+            p95 = np.percentile(scores_arr, 95)
             
-            if success:
-                self.finished.emit(True, "OOD detector calibrated successfully")
-            else:
-                self.finished.emit(False, "Calibration may have failed - check logs")
+            self.log.emit(f"Score statistics:")
+            self.log.emit(f"  Mean: {mean_score:.3f}")
+            self.log.emit(f"  Std: {std_score:.3f}")
+            self.log.emit(f"  Range: [{min(scores):.3f}, {max(scores):.3f}]")
+            self.log.emit(f"  90th percentile: {p90:.3f}")
+            self.log.emit(f"  95th percentile: {p95:.3f}")
+            
+            # Suggest optimal threshold (90th percentile = top 10% are anomalies)
+            optimal_threshold = p90
+            
+            self.log.emit(f"\nRecommended threshold: {optimal_threshold:.3f}")
+            self.log.emit(f"This would mark ~{int(len(scores) * 0.1)} images as anomalies")
+            
+            # Count current anomalies
+            current_anomalies = sum(1 for img in images if img.get("is_anomaly"))
+            self.log.emit(f"Current anomalies: {current_anomalies}")
+            
+            self.finished.emit(True, f"Calibration complete!\nRecommended threshold: {optimal_threshold:.3f}\nCurrent anomalies: {current_anomalies}")
                 
         except Exception as e:
             self.finished.emit(False, str(e))
@@ -384,18 +397,24 @@ class ResultRow(QFrame):
         import subprocess
         import platform
         
-        if not self.filepath or not Path(self.filepath).exists():
+        if not self.filepath:
+            QMessageBox.warning(None, "No File", "No file path available for this image")
+            return
+            
+        filepath = Path(self.filepath)
+        if not filepath.exists():
+            QMessageBox.warning(None, "File Not Found", f"File not found:\n{self.filepath}")
             return
         
         try:
             if platform.system() == "Darwin":  # macOS
-                subprocess.run(["open", self.filepath])
+                subprocess.run(["open", str(filepath)], check=True)
             elif platform.system() == "Windows":
-                subprocess.run(["start", "", self.filepath], shell=True)
+                subprocess.run(["start", "", str(filepath)], shell=True, check=True)
             else:  # Linux
-                subprocess.run(["xdg-open", self.filepath])
+                subprocess.run(["xdg-open", str(filepath)], check=True)
         except Exception as e:
-            print(f"Error opening image: {e}")
+            QMessageBox.warning(None, "Error", f"Could not open image:\n{e}")
 
 
 class VerificationPanel(QWidget):
@@ -480,7 +499,7 @@ class VerificationPanel(QWidget):
         """)
         title_section.addWidget(title)
         
-        subtitle = QLabel("Cross-reference anomalies against SIMBAD & NED astronomical databases")
+        subtitle = QLabel("Verify galaxy anomalies: Morphology analysis & catalog cross-reference")
         subtitle.setStyleSheet("font-size: 12px; color: #4a5568;")
         title_section.addWidget(subtitle)
         
@@ -520,8 +539,8 @@ class VerificationPanel(QWidget):
         controls.addWidget(limit_label)
         
         self.limit_spin = QSpinBox()
-        self.limit_spin.setRange(10, 1000)
-        self.limit_spin.setValue(100)
+        self.limit_spin.setRange(10, 5000)
+        self.limit_spin.setValue(500)  # Higher default to test more candidates
         self.limit_spin.setStyleSheet("""
             QSpinBox {
                 background: rgba(30, 40, 55, 0.8);
@@ -599,6 +618,32 @@ class VerificationPanel(QWidget):
         self.calibrate_btn.clicked.connect(self._start_calibration)
         controls.addWidget(self.calibrate_btn)
         
+        # YOLO Verify button - Hidden for Galaxy mode (enable for Transient mode)
+        # self.yolo_btn = QPushButton("🎯 YOLO Verify")
+        # self.yolo_btn.setToolTip("Run YOLO transient detector on anomaly candidates")
+        # self.yolo_btn.clicked.connect(self._run_yolo_verification)
+        # controls.addWidget(self.yolo_btn)
+        
+        # Morphology Analysis button (Galaxy mode)
+        self.morph_btn = QPushButton("🌀 Analyze Morphology")
+        self.morph_btn.setToolTip("Calculate galaxy morphology features (Asymmetry, Concentration, Clumpiness)")
+        self.morph_btn.setCursor(Qt.PointingHandCursor)
+        self.morph_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(52, 211, 153, 0.2);
+                border: 1px solid rgba(52, 211, 153, 0.4);
+                border-radius: 8px;
+                padding: 10px 16px;
+                color: #34d399;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background: rgba(52, 211, 153, 0.3);
+            }
+        """)
+        self.morph_btn.clicked.connect(self._run_morphology_analysis)
+        controls.addWidget(self.morph_btn)
+        
         header.addLayout(controls)
         
         return header
@@ -625,7 +670,7 @@ class VerificationPanel(QWidget):
         filter_row.addWidget(filter_label)
         
         self.filter_combo = QComboBox()
-        self.filter_combo.addItems(["All", "Unknown Only", "Known Only", "Unverified", "True Positives", "False Positives"])
+        self.filter_combo.addItems(["All", "Unknown (New Discoveries)", "Known Objects", "Needs Review"])
         self.filter_combo.setStyleSheet("""
             QComboBox {
                 background: rgba(30, 40, 55, 0.8);
@@ -853,16 +898,12 @@ class VerificationPanel(QWidget):
         filter_text = self.filter_combo.currentText()
         filtered = self.results
         
-        if filter_text == "Unknown Only":
+        if filter_text == "Unknown (New Discoveries)":
             filtered = [r for r in self.results if not r.get("is_known")]
-        elif filter_text == "Known Only":
+        elif filter_text == "Known Objects":
             filtered = [r for r in self.results if r.get("is_known")]
-        elif filter_text == "Unverified":
+        elif filter_text == "Needs Review":
             filtered = [r for r in self.results if not r.get("human_verified")]
-        elif filter_text == "True Positives":
-            filtered = [r for r in self.results if r.get("human_label") == "true_positive"]
-        elif filter_text == "False Positives":
-            filtered = [r for r in self.results if r.get("human_label") == "false_positive"]
         
         # Add rows (limit to 100 for performance)
         for result in filtered[:100]:
@@ -957,9 +998,9 @@ class VerificationPanel(QWidget):
     def _start_calibration(self):
         """Start OOD calibration."""
         self.calibrate_btn.setEnabled(False)
-        self._log("Starting OOD detector calibration...")
+        self._log("Starting OOD threshold calibration...")
         
-        self.calibrate_worker = CalibrateWorker()
+        self.calibrate_worker = CalibrateWorker(self.api_base)
         self.calibrate_worker.log.connect(self._log)
         self.calibrate_worker.finished.connect(self._on_calibration_finished)
         self.calibrate_worker.start()
@@ -974,3 +1015,190 @@ class VerificationPanel(QWidget):
         else:
             self._log(f"⚠ {message}")
             QMessageBox.warning(self, "Calibration Issue", message)
+    
+    def _run_yolo_verification(self):
+        """Run YOLO transient detector on anomaly candidates."""
+        self.yolo_btn.setEnabled(False)
+        self._log("Starting YOLO transient verification...")
+        
+        try:
+            from inference.yolo_detector import YOLOTransientDetector
+            
+            detector = YOLOTransientDetector()
+            
+            if not detector.is_available():
+                self._log("⚠ YOLO model not available - run Transient pipeline first")
+                QMessageBox.warning(
+                    self, 
+                    "YOLO Not Available",
+                    "YOLO model not found. Please run the Transient pipeline first to train the model."
+                )
+                self.yolo_btn.setEnabled(True)
+                return
+            
+            self._log("✓ YOLO model loaded")
+            
+            # Get total count first
+            try:
+                count_resp = httpx.get(f"{self.api_base}/candidates", params={"limit": 1}, timeout=10.0)
+                # Get actual total from a larger query
+                all_resp = httpx.get(f"{self.api_base}/candidates", params={"limit": 5000}, timeout=30.0)
+                total_anomalies = len(all_resp.json()) if all_resp.status_code == 200 else 0
+                self._log(f"Total anomalies in database: {total_anomalies}")
+            except:
+                total_anomalies = 0
+            
+            # Get candidates from API
+            limit = self.limit_spin.value()
+            try:
+                response = httpx.get(
+                    f"{self.api_base}/candidates",
+                    params={"limit": limit},
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                candidates = response.json()
+            except Exception as e:
+                self._log(f"⚠ Could not fetch candidates: {e}")
+                self.yolo_btn.setEnabled(True)
+                return
+            
+            if not candidates:
+                self._log("No candidates to verify")
+                self.yolo_btn.setEnabled(True)
+                return
+            
+            self._log(f"Testing {len(candidates)}/{total_anomalies} candidates with YOLO...")
+            
+            confirmed = 0
+            rejected = 0
+            
+            for i, candidate in enumerate(candidates):
+                filepath = candidate.get("filepath") or candidate.get("image_path", "")
+                if not filepath or not Path(filepath).exists():
+                    continue
+                
+                result = detector.detect(filepath)
+                
+                if result.is_transient:
+                    confirmed += 1
+                    self._log(f"  ✓ #{candidate.get('id', i)}: TRANSIENT ({result.confidence_pct})")
+                else:
+                    rejected += 1
+                    self._log(f"  ○ #{candidate.get('id', i)}: Not detected")
+            
+            self._log(f"\n=== YOLO Results ===")
+            self._log(f"  Confirmed transients: {confirmed}")
+            self._log(f"  Rejected: {rejected}")
+            self._log(f"  Confirmation rate: {confirmed/(confirmed+rejected)*100:.1f}%" if (confirmed+rejected) > 0 else "  No candidates tested")
+            
+            QMessageBox.information(
+                self,
+                "YOLO Verification Complete",
+                f"Confirmed: {confirmed} transients\nRejected: {rejected} artifacts"
+            )
+            
+        except Exception as e:
+            self._log(f"⚠ YOLO verification failed: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # self.yolo_btn.setEnabled(True)  # Disabled for Galaxy mode
+    
+    def _run_morphology_analysis(self):
+        """Run galaxy morphology analysis on anomaly candidates."""
+        self.morph_btn.setEnabled(False)
+        self._log("Starting galaxy morphology analysis...")
+        
+        try:
+            from features.morphology import GalaxyMorphology
+            
+            analyzer = GalaxyMorphology()
+            self._log("✓ Morphology analyzer loaded")
+            
+            # Get candidates from API
+            try:
+                response = httpx.get(
+                    f"{self.api_base}/candidates",
+                    params={"limit": self.limit_spin.value()},
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                candidates = response.json()
+            except Exception as e:
+                self._log(f"⚠ Could not fetch candidates: {e}")
+                self.morph_btn.setEnabled(True)
+                return
+            
+            if not candidates:
+                self._log("No candidates to analyze")
+                self.morph_btn.setEnabled(True)
+                return
+            
+            self._log(f"Analyzing {len(candidates)} galaxies...")
+            
+            irregular = 0
+            merger = 0
+            compact = 0
+            analyzed = 0
+            high_score = []
+            
+            for i, candidate in enumerate(candidates):
+                filepath = candidate.get("filepath") or candidate.get("image_path", "")
+                if not filepath or not Path(filepath).exists():
+                    continue
+                
+                result = analyzer.analyze(filepath)
+                
+                if result:
+                    analyzed += 1
+                    
+                    if result.is_irregular:
+                        irregular += 1
+                    if result.is_merger:
+                        merger += 1
+                    if result.is_compact:
+                        compact += 1
+                    
+                    # Track high morphology scores
+                    if result.morph_score > 0.5:
+                        high_score.append({
+                            "id": candidate.get('id'),
+                            "filename": Path(filepath).name,
+                            "score": result.morph_score,
+                            "A": result.asymmetry,
+                            "C": result.concentration,
+                            "S": result.smoothness,
+                        })
+                
+                # Progress every 50
+                if (i + 1) % 50 == 0:
+                    self._log(f"  Progress: {i+1}/{len(candidates)}")
+            
+            self._log(f"\n=== Morphology Analysis Complete ===")
+            self._log(f"  Total analyzed: {analyzed}")
+            self._log(f"  Irregular galaxies: {irregular} ({irregular/max(1,analyzed)*100:.1f}%)")
+            self._log(f"  Merger candidates: {merger} ({merger/max(1,analyzed)*100:.1f}%)")
+            self._log(f"  Compact objects: {compact} ({compact/max(1,analyzed)*100:.1f}%)")
+            
+            if high_score:
+                self._log(f"\n=== Top Unusual Morphologies ===")
+                for hs in sorted(high_score, key=lambda x: x['score'], reverse=True)[:10]:
+                    self._log(f"  #{hs['id']}: score={hs['score']:.2f} A={hs['A']:.2f} C={hs['C']:.2f}")
+            
+            QMessageBox.information(
+                self,
+                "Morphology Analysis Complete",
+                f"Analyzed: {analyzed} galaxies\n\n"
+                f"Irregular: {irregular}\n"
+                f"Merger candidates: {merger}\n"
+                f"Compact: {compact}\n\n"
+                f"High morphology score: {len(high_score)}"
+            )
+            
+        except Exception as e:
+            self._log(f"⚠ Morphology analysis failed: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        self.morph_btn.setEnabled(True)

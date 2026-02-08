@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Galaxy Mode{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🔭 Galaxy Mode</h1>
+    <p class="subtitle">Browse, analyze, and discover galaxy anomalies</p>
+</div>
+
+<div class="card-grid cols-4" style="margin-bottom: 24px;">
+    <div class="stat-card">
+        <div class="value">{{ stats.get('total_images', 0) }}</div>
+        <div class="label">Total Images</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-emerald);">{{ stats.get('anomalies', 0) }}</div>
+        <div class="label">Anomalies</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-purple);">{{ stats.get('analyzed', 0) }}</div>
+        <div class="label">Analyzed</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-amber);">{{ images|length }}</div>
+        <div class="label">Showing</div>
+    </div>
+</div>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 16px; font-weight: 500;">Image Gallery</h3>
+        <div>
+            {% if page > 0 %}
+            <a href="/galaxy?page={{ page - 1 }}&limit={{ limit }}" class="btn">← Previous</a>
+            {% endif %}
+            <span style="color: var(--text-tertiary); font-size: 12px; margin: 0 12px;">Page {{ page + 1 }}</span>
+            <a href="/galaxy?page={{ page + 1 }}&limit={{ limit }}" class="btn">Next →</a>
+        </div>
+    </div>
+    
+    <div class="image-grid">
+        {% for img in images %}
+        <div class="image-card" onclick="analyzeImage({{ img.get('id', 0) }})">
+            <img src="/api/images/{{ img.get('id', 0) }}/file" 
+                 alt="{{ img.get('filename', '') }}" 
+                 loading="lazy"
+                 onerror="this.src='data:image/svg+xml,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;180&quot; height=&quot;180&quot; fill=&quot;%23252d40&quot;><rect width=&quot;180&quot; height=&quot;180&quot;/><text x=&quot;50%&quot; y=&quot;50%&quot; text-anchor=&quot;middle&quot; fill=&quot;%234a5568&quot; font-size=&quot;12&quot;>No Image</text></svg>'">
+            <div class="info">
+                <div class="name">{{ img.get('filename', 'Unknown')[:25] }}</div>
+                {% if img.get('is_anomaly') %}
+                <div class="score">OOD: {{ "%.3f"|format(img.get('ood_score', 0) or 0) }}</div>
+                {% elif img.get('class_label') %}
+                <div class="score" style="color: var(--text-tertiary);">{{ img.get('class_label', '') }}</div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Analysis Modal -->
+<div id="analysis-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); z-index:200; justify-content:center; align-items:center;">
+    <div class="card" style="max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 16px;">
+            <h3 style="font-size: 16px;">Analysis Results</h3>
+            <button onclick="closeModal()" class="btn" style="padding: 4px 12px;">✕</button>
+        </div>
+        <div id="analysis-content">Loading...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+async function analyzeImage(imageId) {
+    const modal = document.getElementById('analysis-modal');
+    const content = document.getElementById('analysis-content');
+    modal.style.display = 'flex';
+    content.innerHTML = '<p style="color: var(--text-secondary);">Analyzing image #' + imageId + '...</p>';
+    
+    try {
+        const resp = await fetch('/api/analyze/' + imageId, { method: 'POST' });
+        const data = await resp.json();
+        
+        if (data.error) {
+            content.innerHTML = '<p style="color: var(--accent-rose);">Error: ' + data.error + '</p>';
+            return;
+        }
+        
+        const cls = data.classification || {};
+        const anom = data.anomaly || {};
+        const similar = data.similar || [];
+        
+        content.innerHTML = `
+            <div style="margin-bottom: 16px;">
+                <img src="/api/images/${imageId}/file" style="width:100%;max-height:300px;object-fit:contain;border-radius:8px;">
+            </div>
+            <div class="card-grid cols-3" style="margin-bottom: 16px;">
+                <div class="stat-card">
+                    <div class="value" style="font-size:20px;">${cls.class_label || 'N/A'}</div>
+                    <div class="label">Classification</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" style="font-size:20px;">${((cls.confidence || 0) * 100).toFixed(1)}%</div>
+                    <div class="label">Confidence</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" style="font-size:20px; color: ${anom.is_anomaly ? 'var(--accent-emerald)' : 'var(--text-secondary)'};">${anom.is_anomaly ? 'ANOMALY' : 'Normal'}</div>
+                    <div class="label">OOD Score: ${(anom.ood_score || 0).toFixed(3)}</div>
+                </div>
+            </div>
+            ${similar.length ? '<h4 style="margin-bottom:8px;">Similar Images</h4><p style="color:var(--text-tertiary);font-size:12px;">' + similar.map(s => s.filename + ' (' + (s.similarity * 100).toFixed(0) + '%)').join(', ') + '</p>' : ''}
+        `;
+    } catch (e) {
+        content.innerHTML = '<p style="color: var(--accent-rose);">Failed: ' + e.message + '</p>';
+    }
+}
+
+function closeModal() {
+    document.getElementById('analysis-modal').style.display = 'none';
+}
+
+document.getElementById('analysis-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+</script>
+{% endblock %}

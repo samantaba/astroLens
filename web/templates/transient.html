@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Transient Mode{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🔬 Transient Mode</h1>
+    <p class="subtitle">YOLO-based transient event detection pipeline</p>
+</div>
+
+<div class="card" style="margin-bottom: 24px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 16px; font-weight: 500;">Pipeline Status</h3>
+        <div>
+            <button class="btn btn-success" onclick="refreshState()">↻ Refresh</button>
+        </div>
+    </div>
+    
+    <div id="pipeline-status">
+        {% if pipeline_state %}
+            {% set total_progress = pipeline_state.get('total_progress', 0) %}
+            {% set is_complete = pipeline_state.get('is_complete', False) %}
+            {% set is_running = pipeline_state.get('is_running', False) %}
+            
+            <div style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="font-size: 13px;">Overall Progress</span>
+                    <span style="color: var(--accent-blue);">{{ total_progress|int }}%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="fill" style="width: {{ total_progress|int }}%;"></div>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 16px; font-size: 13px; color: var(--text-secondary);">
+                {% if is_complete %}
+                    <span style="color: var(--accent-emerald);">✓ Pipeline Complete</span>
+                {% elif is_running %}
+                    <span style="color: var(--accent-blue);">◐ Running: {{ pipeline_state.get('current_phase', '') }}</span>
+                {% else %}
+                    <span>○ Pipeline Ready</span>
+                {% endif %}
+            </div>
+            
+            {% for phase in pipeline_state.get('phases', []) %}
+            <div class="phase-card {{ phase.get('status', 'pending') }}">
+                <div class="phase-header">
+                    <span class="phase-name">
+                        {% if phase.get('status') == 'completed' %}✓{% elif phase.get('status') == 'in_progress' %}◐{% elif phase.get('status') == 'failed' %}✗{% else %}○{% endif %}
+                        {{ phase.get('name', 'Phase') }}
+                    </span>
+                    <span style="color: var(--accent-blue);">{{ phase.get('progress', 0)|int }}%</span>
+                </div>
+                <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
+                    {{ phase.get('description', '') }}
+                </p>
+                <div class="progress-bar">
+                    <div class="fill" style="width: {{ phase.get('progress', 0)|int }}%;"></div>
+                </div>
+                
+                {% if phase.get('subtasks') %}
+                <div style="margin-top: 12px; padding-left: 16px;">
+                    {% for st in phase.get('subtasks', []) %}
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                        <span style="color: {% if st.get('status') == 'completed' %}var(--accent-emerald){% elif st.get('status') == 'in_progress' %}var(--accent-blue){% else %}var(--text-tertiary){% endif %};">
+                            {% if st.get('status') == 'completed' %}✓{% elif st.get('status') == 'in_progress' %}◐{% else %}○{% endif %}
+                            {{ st.get('name', '') }}
+                        </span>
+                        {% if st.get('target_count', 0) > 0 %}
+                        <span style="color: var(--text-tertiary);">{{ st.get('current_count', 0) }}/{{ st.get('target_count', 0) }}</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+            
+        {% else %}
+            <p style="color: var(--text-secondary);">No pipeline state found. Start the pipeline from the desktop app.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <h3 style="font-size: 16px; font-weight: 500; margin-bottom: 16px;">About Transient Detection</h3>
+    <div class="card-grid cols-3">
+        <div>
+            <h4 style="font-size: 14px; color: var(--accent-blue); margin-bottom: 8px;">Phase 1: Data Collection</h4>
+            <p style="font-size: 12px; color: var(--text-secondary);">
+                Downloads transient images from TNS (Transient Name Server) and ZTF (Zwicky Transient Facility).
+                Collects real supernova, nova, and variable star images for training.
+            </p>
+        </div>
+        <div>
+            <h4 style="font-size: 14px; color: var(--accent-purple); margin-bottom: 8px;">Phase 2: YOLO Training</h4>
+            <p style="font-size: 12px; color: var(--text-secondary);">
+                Trains YOLOv8 object detection model on collected transient images.
+                Learns to localize and classify transient events in astronomical images.
+            </p>
+        </div>
+        <div>
+            <h4 style="font-size: 14px; color: var(--accent-emerald); margin-bottom: 8px;">Phase 3: Integration</h4>
+            <p style="font-size: 12px; color: var(--text-secondary);">
+                Integrates trained YOLO model with the discovery pipeline.
+                Runs as second-stage filter to confirm OOD-flagged anomalies as real transients.
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+async function refreshState() {
+    try {
+        const resp = await fetch('/api/pipeline-state');
+        const state = await resp.json();
+        location.reload();  // Simple refresh for now
+    } catch (e) {
+        console.error('Failed to refresh:', e);
+    }
+}
+
+// Auto-refresh if running
+{% if pipeline_state.get('is_running', False) %}
+setInterval(refreshState, 5000);
+{% endif %}
+</script>
+{% endblock %}

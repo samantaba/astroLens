@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Verify{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🔍 Verification</h1>
+    <p class="subtitle">Cross-reference anomalies against astronomical catalogs</p>
+</div>
+
+<div class="card-grid cols-4" style="margin-bottom: 24px;">
+    <div class="stat-card">
+        <div class="value">{{ anomalies|length }}</div>
+        <div class="label">Anomaly Candidates</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-blue);">{{ xref_results|selectattr('is_known')|list|length }}</div>
+        <div class="label">Known Objects</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-emerald);">{{ xref_results|rejectattr('is_known')|list|length }}</div>
+        <div class="label">Unknown (Potential New)</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-amber);">{{ xref_results|length }}</div>
+        <div class="label">Cross-Referenced</div>
+    </div>
+</div>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 16px; font-weight: 500;">Cross-Reference Results</h3>
+    </div>
+    
+    {% if xref_results %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Status</th>
+                <th>Image ID</th>
+                <th>Catalog Status</th>
+                <th>Primary Match</th>
+                <th>Type</th>
+                <th>Distance</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in xref_results[:100] %}
+            <tr>
+                <td>
+                    {% if r.get('is_known') %}
+                        <span style="color: var(--text-tertiary);">✓</span>
+                    {% else %}
+                        <span style="color: var(--accent-emerald);">★</span>
+                    {% endif %}
+                </td>
+                <td>#{{ r.get('image_id', '') }}</td>
+                <td>
+                    {% if r.get('is_known') %}
+                        <span class="badge badge-known">Known</span>
+                    {% else %}
+                        <span class="badge badge-unknown">Unknown</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if r.get('primary_match') %}
+                        {{ r['primary_match'].get('object_name', 'N/A') }}
+                    {% else %}
+                        <span style="color: var(--accent-emerald); font-style: italic;">No catalog match</span>
+                    {% endif %}
+                </td>
+                <td>{{ r.get('primary_match', {}).get('object_type', '') }}</td>
+                <td>
+                    {% if r.get('primary_match', {}).get('distance_arcsec') %}
+                        {{ "%.1f"|format(r['primary_match']['distance_arcsec']) }}″
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--text-secondary); text-align: center; padding: 32px;">
+        No cross-reference results yet. Run cross-reference from the desktop app or API.
+    </p>
+    {% endif %}
+</div>
+{% endblock %}

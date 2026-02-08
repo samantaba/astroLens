@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AstroLens - {% block title %}Galaxy Anomaly Discovery{% endblock %}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        :root {
+            --bg-void: #06080c;
+            --bg-deep: #0a0d12;
+            --bg-surface: #0e1218;
+            --bg-elevated: #141820;
+            --bg-hover: #1a2030;
+            --border-subtle: #1e2535;
+            --border-dim: #252d40;
+            --text-primary: #c8d0e0;
+            --text-secondary: #7a8599;
+            --text-tertiary: #4a5568;
+            --accent-blue: #5b8def;
+            --accent-purple: #9b7cef;
+            --accent-emerald: #34d399;
+            --accent-amber: #fbbf24;
+            --accent-rose: #f472b6;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-deep);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 220px;
+            background: var(--bg-void);
+            border-right: 1px solid var(--border-subtle);
+            padding: 24px 16px;
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            z-index: 100;
+        }
+        
+        .logo {
+            font-size: 20px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 32px;
+            letter-spacing: 0.5px;
+        }
+        
+        .nav-section {
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-tertiary);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        
+        .nav-item {
+            display: block;
+            padding: 10px 14px;
+            border-radius: 8px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 13px;
+            margin-bottom: 2px;
+            transition: all 0.15s;
+        }
+        
+        .nav-item:hover {
+            background: rgba(30, 40, 55, 0.4);
+            color: var(--text-primary);
+        }
+        
+        .nav-item.active {
+            background: rgba(91, 141, 239, 0.12);
+            color: var(--text-primary);
+        }
+        
+        .nav-item .icon { margin-right: 8px; }
+        
+        .nav-spacer { flex: 1; }
+        
+        .device-info {
+            padding: 12px;
+            background: var(--bg-surface);
+            border-radius: 8px;
+            font-size: 11px;
+            color: var(--text-tertiary);
+        }
+        
+        .device-info .device-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        
+        .device-badge.gpu { background: rgba(52, 211, 153, 0.2); color: var(--accent-emerald); }
+        .device-badge.cpu { background: rgba(251, 191, 36, 0.2); color: var(--accent-amber); }
+        
+        /* Main content */
+        .main {
+            margin-left: 220px;
+            flex: 1;
+            padding: 32px;
+            min-height: 100vh;
+        }
+        
+        .page-header {
+            margin-bottom: 32px;
+        }
+        
+        .page-header h1 {
+            font-size: 28px;
+            font-weight: 300;
+            margin-bottom: 4px;
+        }
+        
+        .page-header .subtitle {
+            font-size: 13px;
+            color: var(--text-tertiary);
+        }
+        
+        /* Cards */
+        .card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        
+        .card-grid {
+            display: grid;
+            gap: 16px;
+        }
+        
+        .card-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+        .card-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+        .card-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+        
+        /* Stat cards */
+        .stat-card {
+            background: linear-gradient(135deg, rgba(20, 24, 32, 0.8), rgba(30, 40, 55, 0.6));
+            border: 1px solid rgba(60, 80, 120, 0.3);
+            border-radius: 14px;
+            padding: 20px;
+        }
+        
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: 300;
+            color: var(--accent-blue);
+        }
+        
+        .stat-card .label {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 4px;
+        }
+        
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            padding: 10px 20px;
+            border-radius: 10px;
+            border: 1px solid var(--border-dim);
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-decoration: none;
+        }
+        
+        .btn:hover {
+            background: var(--bg-hover);
+            border-color: rgba(91, 141, 239, 0.4);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, rgba(91, 141, 239, 0.9), rgba(139, 92, 246, 0.9));
+            border-color: transparent;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, rgba(91, 141, 239, 1.0), rgba(139, 92, 246, 1.0));
+        }
+        
+        .btn-success {
+            background: rgba(52, 211, 153, 0.2);
+            border-color: rgba(52, 211, 153, 0.4);
+            color: var(--accent-emerald);
+        }
+        
+        /* Image grid */
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 12px;
+        }
+        
+        .image-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .image-card:hover {
+            border-color: var(--accent-blue);
+            transform: translateY(-2px);
+        }
+        
+        .image-card img {
+            width: 100%;
+            aspect-ratio: 1;
+            object-fit: cover;
+        }
+        
+        .image-card .info {
+            padding: 8px 12px;
+        }
+        
+        .image-card .name {
+            font-size: 11px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .image-card .score {
+            font-size: 10px;
+            color: var(--accent-emerald);
+            margin-top: 2px;
+        }
+        
+        /* Table */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .data-table th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 11px;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        
+        .data-table td {
+            padding: 10px 16px;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(30, 40, 55, 0.3);
+        }
+        
+        .data-table tr:hover td {
+            background: rgba(30, 40, 55, 0.2);
+        }
+        
+        /* Badge */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .badge-known { background: rgba(91, 141, 239, 0.2); color: var(--accent-blue); }
+        .badge-unknown { background: rgba(52, 211, 153, 0.2); color: var(--accent-emerald); }
+        .badge-anomaly { background: rgba(244, 114, 182, 0.2); color: var(--accent-rose); }
+        
+        /* Progress */
+        .progress-bar {
+            height: 8px;
+            background: var(--bg-void);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-bar .fill {
+            height: 100%;
+            border-radius: 4px;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+            transition: width 0.3s;
+        }
+        
+        /* Phase cards (transient) */
+        .phase-card {
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+        }
+        
+        .phase-card.pending { background: rgba(30, 35, 45, 0.7); border: 1px solid rgba(50, 55, 70, 0.6); }
+        .phase-card.in_progress { background: rgba(35, 45, 60, 0.7); border: 1px solid rgba(70, 130, 200, 0.6); }
+        .phase-card.completed { background: rgba(30, 50, 40, 0.7); border: 1px solid rgba(60, 180, 100, 0.6); }
+        .phase-card.failed { background: rgba(50, 35, 35, 0.7); border: 1px solid rgba(200, 80, 80, 0.6); }
+        
+        .phase-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .phase-name { font-size: 16px; font-weight: 600; }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar { display: none; }
+            .main { margin-left: 0; }
+            .card-grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <nav class="sidebar">
+        <div class="logo">AstroLens</div>
+        
+        <div class="nav-section">Navigation</div>
+        <a href="/" class="nav-item {% if mode == 'home' %}active{% endif %}">
+            <span class="icon">🏠</span> Dashboard
+        </a>
+        <a href="/galaxy" class="nav-item {% if mode == 'galaxy' %}active{% endif %}">
+            <span class="icon">🔭</span> Galaxy Mode
+        </a>
+        <a href="/transient" class="nav-item {% if mode == 'transient' %}active{% endif %}">
+            <span class="icon">🔬</span> Transient Mode
+        </a>
+        <a href="/verify" class="nav-item {% if mode == 'verify' %}active{% endif %}">
+            <span class="icon">🔍</span> Verify
+        </a>
+        <a href="/export" class="nav-item {% if mode == 'export' %}active{% endif %}">
+            <span class="icon">📊</span> Export
+        </a>
+        
+        <div class="nav-spacer"></div>
+        
+        <div class="device-info" id="device-info">
+            Loading device info...
+        </div>
+    </nav>
+    
+    <main class="main">
+        {% block content %}{% endblock %}
+    </main>
+    
+    <script>
+        // Fetch device info
+        fetch('/api/device')
+            .then(r => r.json())
+            .then(info => {
+                const el = document.getElementById('device-info');
+                const isGpu = info.device_type !== 'cpu';
+                const badge = isGpu ? 'gpu' : 'cpu';
+                const label = isGpu ? 'GPU' : 'CPU';
+                el.innerHTML = `
+                    <span class="device-badge ${badge}">${label}</span>
+                    <div style="margin-top:4px">${info.device_name || 'Unknown'}</div>
+                `;
+            })
+            .catch(() => {
+                document.getElementById('device-info').innerHTML = 'Device: Unknown';
+            });
+    </script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

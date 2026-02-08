@@ -207,13 +207,32 @@ class CatalogCrossReference:
         Supports patterns like:
         - gz_anomaly_0001_ra183.3_dec13.7.jpg
         - sdss_0001_ra200.6_dec40.6.jpg
+        - image_ra_180.0_dec_-30.5.png (underscores around ra/dec)
         - Any filename with ra###.#_dec###.# pattern
         """
         filename = Path(image_path).name
         
-        # Pattern: ra###.#_dec###.#
-        pattern = r'ra([-+]?\d+\.?\d*)_dec([-+]?\d+\.?\d*)'
-        match = re.search(pattern, filename, re.IGNORECASE)
+        # Pattern 1: ra###.#_dec###.# (original, no underscores after ra/dec)
+        pattern1 = r'ra([-+]?\d+\.?\d*)_dec([-+]?\d+\.?\d*)'
+        match = re.search(pattern1, filename, re.IGNORECASE)
+        
+        if match:
+            ra = float(match.group(1))
+            dec = float(match.group(2))
+            return (ra, dec)
+        
+        # Pattern 2: ra_###.#_dec_###.# (underscores after ra/dec)
+        pattern2 = r'ra_([-+]?\d+\.?\d*)_dec_([-+]?\d+\.?\d*)'
+        match = re.search(pattern2, filename, re.IGNORECASE)
+        
+        if match:
+            ra = float(match.group(1))
+            dec = float(match.group(2))
+            return (ra, dec)
+        
+        # Pattern 3: More flexible - ra followed by number, dec followed by number
+        pattern3 = r'ra[_\s]*([-+]?\d+\.?\d*)[_\s]*dec[_\s]*([-+]?\d+\.?\d*)'
+        match = re.search(pattern3, filename, re.IGNORECASE)
         
         if match:
             ra = float(match.group(1))

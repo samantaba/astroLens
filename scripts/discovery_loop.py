@@ -61,6 +61,9 @@ from scripts.discovery_logger import get_discovery_logger
 # Initialize structured logger
 structured_logger = get_discovery_logger()
 
+# API configuration
+API_BASE = "http://localhost:8000"
+
 # Configure logging
 LOG_FILE = DATA_DIR / "discovery_loop.log"
 CANDIDATES_FILE = DATA_DIR / "anomaly_candidates.json"
