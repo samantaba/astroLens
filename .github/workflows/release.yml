@@ -100,7 +100,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-glx libegl1
+          sudo apt-get install -y libgl1 libegl1
 
       - name: Install Python dependencies
         run: |
@@ -202,8 +202,8 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/astrolens:latest
+            ghcr.io/${{ github.repository_owner }}/astrolens:${{ steps.version.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -246,12 +246,12 @@ jobs:
             | macOS (Apple Silicon) | `${{ env.APP_NAME }}-${{ steps.version.outputs.tag }}-macos-arm64.zip` |
             | Linux (x86_64) | `${{ env.APP_NAME }}-${{ steps.version.outputs.tag }}-linux-x86_64.tar.gz` |
             | Windows (x64) | `${{ env.APP_NAME }}-${{ steps.version.outputs.tag }}-windows-x64.zip` |
-            | Docker (all platforms) | `ghcr.io/samantaba/astrolens:${{ steps.version.outputs.tag }}` |
+            | Docker (all platforms) | `ghcr.io/${{ github.repository_owner }}/astrolens:${{ steps.version.outputs.tag }}` |
 
             ### Docker (Easiest)
             ```bash
-            docker pull ghcr.io/samantaba/astrolens:${{ steps.version.outputs.tag }}
-            docker run -p 8000:8000 -p 8080:8080 ghcr.io/samantaba/astrolens:${{ steps.version.outputs.tag }}
+            docker pull ghcr.io/${{ github.repository_owner }}/astrolens:${{ steps.version.outputs.tag }}
+            docker run -p 8000:8000 -p 8080:8080 ghcr.io/${{ github.repository_owner }}/astrolens:${{ steps.version.outputs.tag }}
             # Open http://localhost:8080
             ```
 

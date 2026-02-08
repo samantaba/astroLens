@@ -78,7 +78,10 @@ def generate_spec() -> str:
     if static_dir.exists():
         datas.append((str(static_dir), "web/static"))
     
-    datas_str = ",\n        ".join(f"('{src}', '{dst}')" for src, dst in datas)
+    # Use forward slashes for Windows compatibility in spec file
+    datas_str = ",\n        ".join(
+        f"(r'{src.replace(chr(92), '/')}', r'{dst}')" for src, dst in datas
+    )
     
     # Hidden imports that PyInstaller might miss
     hidden_imports = [
@@ -97,6 +100,11 @@ def generate_spec() -> str:
     
     hidden_str = ",\n        ".join(f"'{h}'" for h in hidden_imports)
     
+    # Use forward slashes for all paths to avoid backslash issues on Windows
+    entry_point = str(PROJECT_ROOT / "ui" / "main.py").replace("\\", "/")
+    project_path = str(PROJECT_ROOT).replace("\\", "/")
+    icon_safe = icon.replace("\\", "/") if icon else ""
+    
     # Platform-specific options
     if plat == "macos":
         bundle_type = "BUNDLE"
@@ -104,7 +112,7 @@ def generate_spec() -> str:
 app = BUNDLE(
     exe,
     name='AstroLens.app',
-    icon='{icon}',
+    icon=r'{icon_safe}',
     bundle_identifier='com.astrolens.app',
     info_plist={{
         'NSHighResolutionCapable': True,
@@ -114,7 +122,7 @@ app = BUNDLE(
 )"""
     else:
         extra = ""
-    
+
     spec_content = f"""# -*- mode: python ; coding: utf-8 -*-
 # AstroLens PyInstaller Spec - {plat}
 # Generated automatically by build/build.py
@@ -125,8 +133,8 @@ import os
 block_cipher = None
 
 a = Analysis(
-    ['{str(PROJECT_ROOT / "ui" / "main.py")}'],
-    pathex=['{str(PROJECT_ROOT)}'],
+    [r'{entry_point}'],
+    pathex=[r'{project_path}'],
     binaries=[],
     datas=[
         {datas_str}
@@ -139,6 +147,7 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         'matplotlib',  # Large, not needed for core UI
+        'astropy.visualization.wcsaxes',  # Needs matplotlib
         'notebook',
         'jupyter',
         'IPython',
@@ -167,7 +176,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='{icon}' if '{icon}' else None,
+    icon=r'{icon_safe}' if r'{icon_safe}' else None,
 )
 
 coll = COLLECT(
