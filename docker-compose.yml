@@ -1,24 +1,25 @@
 version: "3.9"
 
 services:
-  api:
+  astrolens:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "8000:8000"   # API
+      - "8080:8080"   # Web UI
     volumes:
-      - ./data:/app/data          # Persist images and database
-      - ./weights:/app/weights    # ML model weights
+      - astrolens_data:/data             # Database, images, exports
+      - astrolens_models:/app/models     # Pre-trained models
     environment:
       - DATABASE_URL=sqlite:///data/astrolens.db
-      - IMAGES_DIR=/app/data/images
-      - FAISS_INDEX_PATH=/app/data/faiss.index
-      - WEIGHTS_PATH=/app/weights/vit_astrolens.pt
+      - IMAGES_DIR=/data/images
+      - FAISS_INDEX_PATH=/data/faiss.index
+      - WEIGHTS_PATH=/data/weights
       - OOD_THRESHOLD=10.0
-      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_PROVIDER=${LLM_PROVIDER:-none}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - ASTROLENS_API=http://localhost:8000
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -34,8 +35,9 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     profiles:
-      - local-llm  # Only start with: docker-compose --profile local-llm up
+      - local-llm
 
 volumes:
+  astrolens_data:
+  astrolens_models:
   ollama_data:
-
