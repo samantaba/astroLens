@@ -61,7 +61,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller matplotlib
 
       - name: Build macOS app
         run: python build/build.py
@@ -106,7 +106,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller matplotlib
 
       - name: Build Linux binary
         run: python build/build.py
@@ -145,7 +145,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller matplotlib
 
       - name: Build Windows exe
         run: python build/build.py
