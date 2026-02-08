@@ -228,13 +228,26 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Download all artifacts
+      - name: Download macOS build
         uses: actions/download-artifact@v4
         with:
+          name: macos-build
+          path: release-assets/
+
+      - name: Download Linux build
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: release-assets/
+
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
           path: release-assets/
 
       - name: List release assets
-        run: find release-assets/ -type f
+        run: find release-assets/ -type f -name '*.zip' -o -name '*.tar.gz'
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -275,6 +288,7 @@ jobs:
 
             See [README](https://github.com/samantaba/astroLens) for full documentation.
           files: |
-            release-assets/**/*
+            release-assets/*.zip
+            release-assets/*.tar.gz
           draft: false
           prerelease: false

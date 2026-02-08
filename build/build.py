@@ -151,6 +151,10 @@ a = Analysis(
         'notebook',
         'jupyter',
         'IPython',
+        'torch.cuda',  # Reduce bundle size (CUDA libs are huge)
+        'torch.distributed',
+        'triton',
+        'caffe2',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
