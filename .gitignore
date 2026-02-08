@@ -112,7 +112,11 @@ nosetests.xml
 coverage.xml
 
 # Test scripts (internal testing, not for distribution)
-tests/
+# Ignore test contents by default, but allow CI-required test files through
+tests/*
+!tests/test_morphology.py
+!tests/test_ui_components.py
+!tests/test_all_features.py
 scripts/test_*.py
 
 # ─────────────────────────────────────────────────────────────────────────────

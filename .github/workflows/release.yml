@@ -18,6 +18,8 @@ jobs:
   # ─────────────────────────────────────────────────
   test:
     runs-on: ubuntu-latest
+    env:
+      ASTROLENS_ARTIFACTS_DIR: ${{ github.workspace }}/astrolens_artifacts
     steps:
       - uses: actions/checkout@v4
         with:

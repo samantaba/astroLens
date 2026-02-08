@@ -15,6 +15,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11"]
 
+    env:
+      ASTROLENS_ARTIFACTS_DIR: ${{ github.workspace }}/astrolens_artifacts
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,6 +77,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-logs-${{ matrix.os }}
-          path: |
-            ../astrolens_artifacts/test_logs/
+          path: astrolens_artifacts/test_logs/
+          if-no-files-found: ignore
           retention-days: 7
