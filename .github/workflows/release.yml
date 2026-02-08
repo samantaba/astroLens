@@ -1,0 +1,223 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: AstroLens
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ─────────────────────────────────────────────────
+  # Run tests before building
+  # ─────────────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/test_morphology.py -v --tb=short
+          python tests/test_ui_components.py
+          python tests/test_all_features.py --section ood
+          python tests/test_all_features.py --section morphology
+          python tests/test_all_features.py --section reconstruction
+
+  # ─────────────────────────────────────────────────
+  # Build for macOS (Apple Silicon + Intel)
+  # ─────────────────────────────────────────────────
+  build-macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build macOS app
+        run: python build/build.py
+
+      - name: Get version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Package macOS app
+        run: |
+          cd build/dist/macos
+          zip -r ../../../${{ env.APP_NAME }}-${{ steps.version.outputs.tag }}-macos-arm64.zip ${{ env.APP_NAME }}.app || \
+          zip -r ../../../${{ env.APP_NAME }}-${{ steps.version.outputs.tag }}-macos-arm64.zip ${{ env.APP_NAME }}/
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: ${{ env.APP_NAME }}-*.zip
+
+  # ─────────────────────────────────────────────────
+  # Build for Linux
+  # ─────────────────────────────────────────────────
+  build-linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-glx libegl1
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Linux binary
+        run: python build/build.py
+
+      - name: Get version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Package Linux binary
+        run: |
+          cd build/dist/linux
+          tar -czf ../../../${{ env.APP_NAME }}-${{ steps.version.outputs.tag }}-linux-x86_64.tar.gz ${{ env.APP_NAME }}/
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: ${{ env.APP_NAME }}-*.tar.gz
+
+  # ─────────────────────────────────────────────────
+  # Build for Windows
+  # ─────────────────────────────────────────────────
+  build-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Windows exe
+        run: python build/build.py
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Package Windows build
+        shell: bash
+        run: |
+          cd build/dist/windows
+          7z a ../../../${{ env.APP_NAME }}-${{ steps.version.outputs.tag }}-windows-x64.zip ${{ env.APP_NAME }}/
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: ${{ env.APP_NAME }}-*.zip
+
+  # ─────────────────────────────────────────────────
+  # Create GitHub Release with all platform builds
+  # ─────────────────────────────────────────────────
+  release:
+    needs: [build-macos, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Get version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+
+      - name: List release assets
+        run: find release-assets/ -type f
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "${{ env.APP_NAME }} ${{ steps.version.outputs.tag }}"
+          body: |
+            ## AstroLens ${{ steps.version.outputs.tag }}
+
+            AI-Powered Galaxy Anomaly Discovery System.
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | macOS (Apple Silicon) | `${{ env.APP_NAME }}-${{ steps.version.outputs.tag }}-macos-arm64.zip` |
+            | Linux (x86_64) | `${{ env.APP_NAME }}-${{ steps.version.outputs.tag }}-linux-x86_64.tar.gz` |
+            | Windows (x64) | `${{ env.APP_NAME }}-${{ steps.version.outputs.tag }}-windows-x64.zip` |
+
+            ### What's Included
+            - Pre-trained YOLO transient detection model (no training required)
+            - Galaxy morphology analysis (CAS, Gini-M20)
+            - Web interface for browser-based access
+            - Multi-source data pipeline (DECaLS, SDSS, Pan-STARRS)
+
+            ### Requirements
+            - Python 3.10+ (for running from source)
+            - 8GB+ RAM recommended
+            - GPU optional (CUDA / Apple MPS auto-detected)
+
+            See [README](https://github.com/samantaba/astroLens) for full documentation.
+          files: |
+            release-assets/**/*
+          draft: false
+          prerelease: false

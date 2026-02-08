@@ -61,7 +61,23 @@ class DeviceInfo:
             )
         
         # Check MPS (Apple Silicon)
-        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        # torch.backends.mps.is_available() can return False on newer macOS
+        # versions that PyTorch doesn't recognize yet, so also probe directly.
+        mps_works = False
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_built():
+            if torch.backends.mps.is_available():
+                mps_works = True
+            else:
+                # Direct probe: try creating a tensor on MPS
+                try:
+                    _t = torch.tensor([1.0], device="mps")
+                    del _t
+                    mps_works = True
+                    logger.info("MPS probe succeeded (is_available was False)")
+                except Exception:
+                    pass
+        
+        if mps_works:
             chip = _detect_apple_chip()
             logger.info(f"Apple MPS detected: {chip}")
             return cls(
@@ -128,10 +144,20 @@ def get_device(force: Optional[str] = None):
     # Priority: CUDA > MPS > CPU
     if torch.cuda.is_available():
         _cached_device = torch.device("cuda")
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        _cached_device = torch.device("mps")
     else:
-        _cached_device = torch.device("cpu")
+        # Check MPS with direct probe fallback (macOS version detection bug)
+        mps_ok = False
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_built():
+            if torch.backends.mps.is_available():
+                mps_ok = True
+            else:
+                try:
+                    _t = torch.tensor([1.0], device="mps")
+                    del _t
+                    mps_ok = True
+                except Exception:
+                    pass
+        _cached_device = torch.device("mps") if mps_ok else torch.device("cpu")
     
     logger.info(f"Using device: {_cached_device}")
     return _cached_device

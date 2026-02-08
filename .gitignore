@@ -83,6 +83,9 @@ transient_data/
 *.safetensors
 *.bin
 
+# Allow Git LFS tracked models
+!models/*.pt
+
 # Model checkpoints (HuggingFace format)
 checkpoint-*/
 
