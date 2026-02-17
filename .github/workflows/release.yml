@@ -205,7 +205,17 @@ jobs:
           body: |
             ## AstroLens ${{ steps.version.outputs.tag }}
 
-            AI-Powered Galaxy Anomaly Discovery System.
+            AI-Powered Astronomical Anomaly Detection -- autonomous sky survey analysis with self-correcting intelligence.
+
+            ### What's New in v1.1.0
+            - **Streaming Discovery**: Fully autonomous multi-day pipeline that downloads, analyzes, and reports anomaly candidates 24/7
+            - **Self-Correcting Intelligence**: Auto-adjusts thresholds, rebalances sources, recalibrates detection in real time
+            - **YOLO v1.1 Model**: Fine-tuned transient detector achieving 99.5% mAP50 (up from 51.5%)
+            - **Daily HTML Reports**: Automated charts, rankings, and trend analysis
+            - **Web Streaming Dashboard**: Live monitoring with Chart.js visualizations
+            - **Desktop Streaming Panel**: Start, stop, and monitor from the native UI
+
+            Validated in a 3-day autonomous run: 20,997 images analyzed, 3,458 anomaly candidates, known objects independently recovered (SN 2014J, NGC 3690, SDSS J0252+0039).
 
             ### Downloads
             | Platform | File |
@@ -214,26 +224,18 @@ jobs:
             | Windows (x64) | `${{ env.APP_NAME }}-${{ steps.version.outputs.tag }}-windows-x64.zip` |
             | Linux / All platforms | Docker (see below) |
 
-            ### Linux & Docker (Recommended)
+            ### Docker
             ```bash
             docker pull ghcr.io/${{ github.repository_owner }}/astrolens:${{ steps.version.outputs.tag }}
             docker run -p 8000:8000 -p 8080:8080 ghcr.io/${{ github.repository_owner }}/astrolens:${{ steps.version.outputs.tag }}
-            # Open http://localhost:8080
             ```
 
-            ### What's Included
-            - Pre-trained YOLO transient detection model (no training required)
-            - Galaxy morphology analysis (CAS, Gini-M20)
-            - Web interface for browser-based access
-            - Multi-source data pipeline (DECaLS, SDSS, Pan-STARRS)
-
             ### Requirements
-            - Docker (for container), OR
-            - Python 3.10+ (for running from source)
+            - Python 3.10+ (or Docker)
             - 8GB+ RAM recommended
             - GPU optional (CUDA / Apple MPS auto-detected)
 
-            See [README](https://github.com/samantaba/astroLens) for full documentation.
+            Full documentation: [README](https://github.com/samantaba/astroLens) | [Wiki](https://github.com/samantaba/astroLens/wiki)
           files: |
             release-assets/*.zip
           draft: false
