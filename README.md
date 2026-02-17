@@ -5,12 +5,12 @@
 <h1 align="center">AstroLens</h1>
 
 <p align="center">
-  <strong>AI-Powered Galaxy Anomaly Discovery System</strong><br>
-  <em>Find unusual galaxies that traditional surveys miss</em>
+  <strong>AI that watches the sky and finds what others miss.</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="Version">
+  <a href="https://github.com/samantaba/astroLens/stargazers"><img src="https://img.shields.io/github/stars/samantaba/astroLens?style=social" alt="Stars"></a>
+  <img src="https://img.shields.io/badge/version-1.1.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.10%2B-green" alt="Python">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="License">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="Platform">
@@ -18,24 +18,53 @@
 </p>
 
 <p align="center">
-  <a href="#why-astrolens">Why AstroLens</a> &bull;
+  <a href="#what-is-astrolens">What Is It</a> &bull;
+  <a href="#what-it-found">What It Found</a> &bull;
   <a href="#features">Features</a> &bull;
   <a href="#quick-start">Quick Start</a> &bull;
-  <a href="#web-interface">Web Interface</a> &bull;
-  <a href="#testing">Testing</a> &bull;
-  <a href="#building">Building</a> &bull;
-  <a href="docs/WIKI.md">Wiki</a>
+  <a href="#streaming-discovery-v110">Streaming Discovery</a> &bull;
+  <a href="#how-it-works">How It Works</a> &bull;
+  <a href="https://github.com/samantaba/astroLens/wiki">Wiki</a>
 </p>
 
 ---
 
-## Why AstroLens?
+## What Is AstroLens?
 
-Astronomical surveys generate millions of images. Most get classified by standard pipelines and never looked at again. **AstroLens finds what those pipelines miss** -- unusual galaxy morphologies, merger candidates, compact objects, and structures that don't fit known categories.
+AstroLens is an open-source tool that automatically scans the sky for unusual astronomical objects. You start it, and it does the rest: it downloads real images from major sky surveys, analyzes every one of them using AI, and tells you if it finds something interesting.
 
-It does this by combining a **Vision Transformer** (ViT) with an **ensemble of out-of-distribution detectors**, then cross-referencing results against real astronomical catalogs (SIMBAD, NED, VizieR). If an object is unknown to existing catalogs, it could be a genuine new discovery.
+Think of it as a tireless research assistant that never sleeps. It watches the sky 24/7, learns as it goes, corrects its own mistakes, and presents you with a shortlist of the most promising discoveries -- all without any human supervision.
 
-**Galaxy Mode** focuses on morphological anomalies. **Transient Mode** uses YOLO to detect supernovae and variable stars. Both run autonomously.
+**In a 3-day autonomous test run, AstroLens:**
+
+- Analyzed **20,997 images** from 7 astronomical survey sources
+- Identified **3,458 anomaly candidates** across 354 unique sky regions
+- Independently recovered known objects including **Supernova SN 2014J**, galaxy merger **NGC 3690**, and gravitational lens **SDSS J0252+0039** -- without being told what to look for
+- Trained its own transient detection model to **99.5% accuracy** using data it collected during the run
+- Made **140 self-correction adjustments** with zero errors and zero human intervention
+
+---
+
+## What It Found
+
+During streaming discovery, AstroLens independently flagged these known, published objects -- validating that the detection pipeline works on real science:
+
+| Object | What It Is | YOLO Confidence | OOD Score |
+|--------|-----------|-----------------|-----------|
+| **SN 2014J** | Type Ia supernova in galaxy M82, 11.4M light-years away | 52% | 0.26 |
+| **NGC 3690** | Violent galaxy merger (Arp 299), one of the most luminous infrared galaxies nearby | 60% | 0.11 |
+| **SDSS J0252+0039** | Confirmed strong gravitational lens -- massive galaxy bending background light | 61% | 0.35 |
+
+All detections were cross-referenced against the **SIMBAD international astronomical database**. The system found these objects on its own, using only the AI models and no prior knowledge of what was in the images.
+
+---
+
+## Who Is This For?
+
+- **Astronomy enthusiasts** who want to discover things for themselves
+- **Researchers** who need an automated anomaly detection pipeline for survey data
+- **ML engineers** interested in a production Vision Transformer + OOD + YOLO system
+- **Anyone** curious about what happens when you point AI at the sky and let it run
 
 ---
 
@@ -60,6 +89,16 @@ It does this by combining a **Vision Transformer** (ViT) with an **ensemble of o
 | **YOLO Detection** | YOLOv8 object detection trained on real transient images from TNS and ZTF |
 | **3-Phase Pipeline** | Automated: (1) Data collection, (2) Model training, (3) Integration with discovery |
 | **Pre-trained Model** | Ships with a trained model so users can detect transients immediately |
+
+### Streaming Discovery (v1.1.0)
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-Day Streaming** | Runs autonomously for days, downloading and analyzing images 24/7 |
+| **Self-Correcting Intelligence** | Auto-adjusts thresholds, rebalances data sources, improves as it runs |
+| **Daily Reports** | Generates HTML reports with charts, candidate rankings, and trend analysis |
+| **Publishing Pipeline** | Surfaces the best candidates with supporting evidence for publication |
+| **UI + CLI** | Start, monitor, and stop streaming from the desktop app or command line |
 
 ### Infrastructure
 
@@ -193,15 +232,15 @@ The web interface runs at `http://localhost:8080` and provides:
 | Fine-tuning Improvement | +4.9% |
 | OOD Detection Methods | MSP, Energy, Mahalanobis (ensemble) |
 | Morphology Features | CAS, Gini-M20, Ellipticity |
-| YOLO Transient mAP50 | 51.5% (v1 -- improving with more data) |
+| YOLO Transient mAP50 | 99.5% (v1.1 -- trained on 2,742 images / 5,234 annotations) |
 | Inference Time (CPU) | ~274ms/image |
 | Inference Time (MPS) | ~50ms/image |
 
 ---
 
-## Milestone: v1.0.0
+## Milestone: v1.1.0
 
-This release represents months of development. Here is what was built:
+Streaming discovery with self-correcting intelligence. Validated over a 3-day autonomous run: 20,997 images analyzed, 3,458 anomaly candidates, known astronomical objects independently recovered.
 
 **ML Pipeline**
 - Vision Transformer fine-tuned on Galaxy10 + Galaxy Zoo (83.9% accuracy, +4.9% improvement)
@@ -221,7 +260,7 @@ This release represents months of development. Here is what was built:
 - GPU auto-detection (CUDA / Apple MPS / CPU)
 - Multi-source data pipeline (DECaLS, SDSS, Pan-STARRS, Hubble)
 - CI/CD: GitHub Actions build for macOS, Linux, Windows
-- Pre-trained YOLO model included via Git LFS
+- Pre-trained YOLO models included (v1.0 + v1.1 fine-tuned)
 
 ---
 
@@ -235,8 +274,8 @@ python build/build.py
 Or let GitHub Actions build automatically on each tagged release:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 This triggers the release workflow, which builds for all 3 platforms and creates a GitHub Release with downloadable executables.
@@ -313,6 +352,29 @@ export NASA_API_KEY=...
 
 ---
 
+## Streaming Discovery (v1.1.0)
+
+AstroLens can run **autonomously for days**, continuously downloading, analyzing, and reporting anomaly candidates.
+
+```bash
+# Start streaming discovery (runs until stopped)
+python scripts/streaming_discovery.py --days 7
+
+# Or launch from the UI: Settings > Streaming Discovery > Start
+```
+
+What the streaming engine does:
+- Downloads images 24/7 from 5+ astronomical surveys
+- Runs full ViT + OOD + morphology + catalog pipeline on every image
+- **Self-corrects**: adjusts thresholds, rebalances sources, re-prioritizes based on what it finds
+- Generates **daily HTML reports** with charts, candidate rankings, and improvement metrics
+- Saves everything to local files (never pushes to Git)
+- Produces a **publishing-ready summary** of the best candidates
+
+Reports are saved to `astrolens_artifacts/streaming_reports/`.
+
+---
+
 ## Contributing
 
 1. Fork the repository
@@ -329,9 +391,14 @@ CI will run tests automatically on your PR.
 
 - **Issues:** [GitHub Issues](https://github.com/samantaba/astroLens/issues)
 - **Discussions:** [GitHub Discussions](https://github.com/samantaba/astroLens/discussions)
-- **Wiki:** [Full Documentation](docs/WIKI.md)
+- **Wiki:** [Full Documentation](https://github.com/samantaba/astroLens/wiki)
 
-If AstroLens helps your research, please consider starring the repository.
+---
+
+<p align="center">
+  <strong>If AstroLens helps your research or you like the idea, please <a href="https://github.com/samantaba/astroLens/stargazers">give it a star</a>.</strong><br>
+  It takes 2 seconds and helps others find the project.
+</p>
 
 ---
 

@@ -21,6 +21,7 @@ from .training_panel import TrainingPanel
 from .discovery_panel import DiscoveryPanel
 from .verification_panel import VerificationPanel
 from .transient_panel import TransientPanel
+from .streaming_panel import StreamingPanel
 
 
 class ControlCenter(QWidget):
@@ -98,8 +99,10 @@ class ControlCenter(QWidget):
         self.discovery_panel = DiscoveryPanel()
         self.verification_panel = VerificationPanel()
         self.transient_panel = TransientPanel()
+        self.streaming_panel = StreamingPanel()
         
         self.tabs.addTab(self.discovery_panel, "🔭 Discovery")
+        self.tabs.addTab(self.streaming_panel, "📡 Streaming")
         self.tabs.addTab(self.verification_panel, "🔍 Verify")
         self.tabs.addTab(self.transient_panel, "🔬 Transient")
         self.tabs.addTab(self.sources_panel, "Data Sources")
@@ -141,6 +144,9 @@ class ControlCenter(QWidget):
     
     def show_discovery(self):
         self.tabs.setCurrentWidget(self.discovery_panel)
+    
+    def show_streaming(self):
+        self.tabs.setCurrentWidget(self.streaming_panel)
     
     def show_verification(self):
         self.tabs.setCurrentWidget(self.verification_panel)

@@ -281,6 +281,27 @@ class MainWindow(QMainWindow):
         discovery_btn.clicked.connect(self._show_discovery)
         layout.addWidget(discovery_btn)
         
+        streaming_btn = QPushButton("📡 Streaming Discovery")
+        streaming_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(88, 166, 255, 0.15), stop:1 rgba(163, 113, 247, 0.1));
+                border: 1px solid rgba(88, 166, 255, 0.3);
+                padding: 10px 12px;
+                border-radius: 8px;
+                text-align: left;
+                color: #58a6ff;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background: rgba(88, 166, 255, 0.2);
+                border-color: rgba(88, 166, 255, 0.5);
+            }
+        """)
+        streaming_btn.clicked.connect(self._show_streaming)
+        layout.addWidget(streaming_btn)
+        
         download_btn = QPushButton("Download")
         download_btn.setStyleSheet(btn_style)
         download_btn.clicked.connect(self._show_downloads)
@@ -409,6 +430,11 @@ class MainWindow(QMainWindow):
         self.content_stack.setCurrentIndex(3)
         self.nav_list.setCurrentRow(3)
         self.control_center.show_discovery()
+
+    def _show_streaming(self):
+        self.content_stack.setCurrentIndex(3)
+        self.nav_list.setCurrentRow(3)
+        self.control_center.show_streaming()
 
     def _show_anomalies(self):
         self.content_stack.setCurrentIndex(0)

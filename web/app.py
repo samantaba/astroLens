@@ -16,6 +16,8 @@ import json
 import logging
 import os
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 # Add project root
@@ -29,6 +31,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import httpx
 import uvicorn
+
+from paths import DATA_DIR, ARTIFACTS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +134,7 @@ async def galaxy_mode(request: Request, page: int = 0, limit: int = 50):
 async def transient_mode(request: Request):
     """Transient Mode - YOLO-based transient detection."""
     pipeline_state = {}
-    state_file = Path(__file__).parent.parent.parent / "astrolens_artifacts" / "transient_data" / "pipeline_state.json"
+    state_file = ARTIFACTS_DIR / "transient_data" / "pipeline_state.json"
     
     if state_file.exists():
         try:
@@ -161,7 +165,7 @@ async def verify_page(request: Request):
         logger.error(f"API error: {e}")
     
     # Load cross-ref results
-    xref_file = Path(__file__).parent.parent.parent / "astrolens_artifacts" / "data" / "cross_reference_results.json"
+    xref_file = DATA_DIR / "cross_reference_results.json"
     if xref_file.exists():
         try:
             with open(xref_file) as f:
@@ -175,6 +179,76 @@ async def verify_page(request: Request):
         "anomalies": anomalies,
         "xref_results": xref_results,
         "mode": "verify",
+    })
+
+
+@app.get("/streaming", response_class=HTMLResponse)
+async def streaming_page(request: Request):
+    """Streaming Discovery dashboard with live charts."""
+    streaming = {}
+    snapshots = []
+    source_stats = {}
+
+    # Load streaming state
+    streaming_state_file = DATA_DIR / "streaming_state.json"
+    if streaming_state_file.exists():
+        try:
+            with open(streaming_state_file) as f:
+                streaming = json.load(f)
+                snapshots = streaming.get("daily_snapshots", [])
+        except Exception:
+            pass
+
+    # Check if still running (state file modified in last 2 minutes)
+    if streaming_state_file.exists():
+        age = time.time() - streaming_state_file.stat().st_mtime
+        streaming["running"] = age < 120 and not streaming.get("completed", False)
+    else:
+        streaming["running"] = False
+
+    # Merge live discovery state (updated every cycle)
+    discovery_file = DATA_DIR / "discovery_state.json"
+    if discovery_file.exists():
+        try:
+            with open(discovery_file) as f:
+                disc = json.load(f)
+            # Use freshest values from discovery_state
+            streaming["total_images"] = disc.get("total_analyzed", streaming.get("total_images", 0))
+            streaming["total_anomalies"] = disc.get("anomalies_found", streaming.get("total_anomalies", 0))
+            streaming["live_threshold"] = disc.get("current_threshold", 3.0)
+            streaming["live_cycles"] = disc.get("cycles_completed", 0)
+        except Exception:
+            pass
+
+    # Load source stats
+    source_file = DATA_DIR / "source_stats.json"
+    if source_file.exists():
+        try:
+            with open(source_file) as f:
+                source_stats = json.load(f)
+        except Exception:
+            pass
+
+    # Load top candidates with YOLO info
+    candidates_file = DATA_DIR / "anomaly_candidates.json"
+    if candidates_file.exists():
+        try:
+            with open(candidates_file) as f:
+                cands = json.load(f)
+            cands.sort(key=lambda c: (c.get("yolo_confirmed", False), c.get("ood_score", 0)), reverse=True)
+            streaming["top_candidates"] = cands[:20]
+            streaming["yolo_detections"] = sum(1 for c in cands if c.get("yolo_confirmed"))
+            streaming["total_candidates"] = len(cands)
+        except Exception:
+            pass
+
+    return templates.TemplateResponse("streaming.html", {
+        "request": request,
+        "streaming": streaming,
+        "snapshots_json": json.dumps(snapshots),
+        "source_json": json.dumps(source_stats),
+        "now": datetime.now().strftime("%H:%M:%S"),
+        "mode": "streaming",
     })
 
 
@@ -288,11 +362,64 @@ async def device_info():
 @app.get("/api/pipeline-state")
 async def pipeline_state():
     """Get transient pipeline state."""
-    state_file = Path(__file__).parent.parent.parent / "astrolens_artifacts" / "transient_data" / "pipeline_state.json"
+    state_file = ARTIFACTS_DIR / "transient_data" / "pipeline_state.json"
     if state_file.exists():
         with open(state_file) as f:
             return json.load(f)
     return {"status": "not_started"}
+
+
+@app.get("/api/streaming-state")
+async def streaming_state():
+    """Get live streaming discovery state for dashboard auto-refresh."""
+    state_file = DATA_DIR / "streaming_state.json"
+    discovery_file = DATA_DIR / "discovery_state.json"
+
+    data = {}
+    if state_file.exists():
+        try:
+            with open(state_file) as f:
+                data = json.load(f)
+            age = time.time() - state_file.stat().st_mtime
+            data["running"] = age < 120 and not data.get("completed", False)
+        except Exception as e:
+            return {"error": str(e), "running": False}
+
+    # Also merge live metrics from discovery_state (updated every cycle)
+    if discovery_file.exists():
+        try:
+            with open(discovery_file) as f:
+                disc = json.load(f)
+            # These are the freshest numbers (updated every cycle)
+            data["live_images"] = disc.get("total_analyzed", 0)
+            data["live_anomalies"] = disc.get("anomalies_found", 0)
+            data["live_threshold"] = disc.get("current_threshold", 3.0)
+            data["live_cycles"] = disc.get("cycles_completed", 0)
+            data["live_accuracy"] = disc.get("model_accuracy", 0)
+            # Use discovery_state freshness to check if process is alive
+            disc_age = time.time() - discovery_file.stat().st_mtime
+            if disc_age < 120:
+                data["running"] = True
+        except Exception:
+            pass
+
+    # Include top candidates with YOLO info
+    candidates_file = DATA_DIR / "anomaly_candidates.json"
+    if candidates_file.exists():
+        try:
+            with open(candidates_file) as f:
+                cands = json.load(f)
+            # Sort by OOD score descending, YOLO-confirmed first
+            cands.sort(key=lambda c: (c.get("yolo_confirmed", False), c.get("ood_score", 0)), reverse=True)
+            data["top_candidates"] = cands[:20]
+            data["yolo_detections"] = sum(1 for c in cands if c.get("yolo_confirmed"))
+            data["total_candidates"] = len(cands)
+        except Exception:
+            pass
+
+    if not data:
+        return {"running": False, "started_at": ""}
+    return data
 
 
 def main():

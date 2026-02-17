@@ -5,7 +5,7 @@ UI Component Import Tests for AstroLens.
 Verifies that all UI modules can be imported and their key classes are accessible.
 These tests do NOT require a display server -- they only check Python imports.
 
-Expected: 14/14 passed.
+Expected: 15/15 passed.
 """
 
 import importlib
@@ -85,7 +85,10 @@ def main() -> int:
     # 13. Verification panel
     check("VerificationPanel", "ui.verification_panel", ["VerificationPanel"])
 
-    # 14. Package-level import (ui.__init__)
+    # 14. Streaming panel
+    check("StreamingPanel", "ui.streaming_panel", ["StreamingPanel"])
+
+    # 15. Package-level import (ui.__init__)
     check("ui package (MainWindow re-export)", "ui", ["MainWindow"])
 
     # Summary

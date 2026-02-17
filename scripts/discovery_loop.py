@@ -135,6 +135,9 @@ class AnomalyCandidate:
     source: str
     detected_at: str
     is_confirmed: bool = False
+    yolo_confirmed: bool = False
+    yolo_confidence: float = 0.0
+    is_transient_source: bool = False
 
 
 class DiscoveryLoop:
@@ -161,9 +164,9 @@ class DiscoveryLoop:
         images_per_cycle: int = 30,
         finetune_every_n_cycles: int = 15,  # Changed: more frequent (was 20)
         adaptive_threshold: bool = True,
-        initial_threshold: float = 2.5,  # Changed: more sensitive (was 3.0)
-        min_threshold: float = 0.5,  # Changed: can go lower (was 1.0)
-        threshold_decay: float = 0.95,
+        initial_threshold: float = 3.0,
+        min_threshold: float = 1.5,  # Floor: prevents false positives from threshold collapse
+        threshold_decay: float = 0.97,  # Slower decay to avoid runaway lowering
         aggressive: bool = False,
         turbo: bool = False,
     ):
@@ -179,15 +182,15 @@ class DiscoveryLoop:
             self.cycle_interval = 30  # 30 seconds
             self.images_per_cycle = 50
             self.finetune_every_n = 10
-            initial_threshold = 2.0
+            initial_threshold = 2.5
         
         # Turbo mode: no wait, maximum throughput
         if turbo:
             self.cycle_interval = 5  # Minimal wait (just to not hammer APIs)
             self.images_per_cycle = 100
             self.finetune_every_n = 5
-            initial_threshold = 1.5
-            self.threshold_decay = 0.98  # Slower decay since we're already low
+            initial_threshold = 2.0
+            self.threshold_decay = 0.98  # Slower decay since we're already lower
         
         # Load or create state
         self.stats = self._load_state()
@@ -204,6 +207,7 @@ class DiscoveryLoop:
         self._duplicate_detector = None
         self._source_manager = None
         self._active_learning = None
+        self._yolo_detector = None
         
         # Signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._handle_shutdown)
@@ -425,6 +429,23 @@ class DiscoveryLoop:
                 confidence_high=0.6,
             )
         return self._active_learning
+
+    @property
+    def yolo_detector(self):
+        """Lazy-load YOLO transient detector (second-stage confirmation)."""
+        if self._yolo_detector is None:
+            try:
+                from inference.yolo_detector import YOLOTransientDetector
+                self._yolo_detector = YOLOTransientDetector()
+                if self._yolo_detector.is_available():
+                    logger.info("  YOLO transient detector loaded (second-stage confirmation)")
+                else:
+                    logger.info("  YOLO model not available - running ViT+OOD only")
+            except Exception as e:
+                logger.debug(f"  YOLO detector not available: {e}")
+                # Create a stub that always returns not available
+                self._yolo_detector = type("Stub", (), {"is_available": lambda self: False})()
+        return self._yolo_detector
 
     def _load_known_hashes(self):
         """Load known hashes from database."""
@@ -656,13 +677,38 @@ class DiscoveryLoop:
             # Run ensemble OOD detection with embedding
             ood_result = self.ood_detector.detect(result.logits, result.embedding)
             
-            # Check both OOD score AND if class itself is an anomaly type
+            # Anomaly detection logic:
+            # The OOD ensemble votes (MSP, energy, Mahalanobis).
+            # In aggressive mode, voting_threshold=1 so low classifier confidence
+            # alone can trigger is_anomaly -- we MUST verify with the OOD score.
+            #
+            # Rules:
+            # 1. OOD score >= threshold -> definite anomaly (statistical outlier)
+            # 2. OOD ensemble votes + OOD score >= 50% threshold -> anomaly
+            #    (ensemble detected something AND score shows real signal)
+            # 3. Anomaly class + OOD score >= 50% threshold -> anomaly
+            #    (classifier AND statistical evidence agree)
+            # 4. Anything with OOD score < 50% threshold is NOT an anomaly,
+            #    regardless of ensemble votes or class label.
             is_anomaly_class = self.classifier.is_anomaly_class(result.class_label)
-            is_anomaly = ood_result.is_anomaly or is_anomaly_class
+            ood_score_val = float(ood_result.ood_score) if ood_result.ood_score is not None else 0.0
+            threshold_val = float(self.stats.current_threshold)
+            min_score = threshold_val * 0.5  # Absolute minimum for any anomaly
+
+            # Only flag as anomaly if OOD score shows real statistical signal
+            is_anomaly = False
+            if ood_score_val >= threshold_val:
+                # Rule 1: clear statistical outlier
+                is_anomaly = True
+            elif ood_score_val >= min_score:
+                # Rules 2 & 3: moderate signal confirmed by ensemble or classifier
+                if ood_result.is_anomaly or is_anomaly_class:
+                    is_anomaly = True
+            # Below min_score: never an anomaly (prevents false positive flood)
             
-            # Determine if near-miss (high OOD but below threshold)
-            near_miss_threshold = self.stats.current_threshold * 0.8
-            is_near_miss = (not is_anomaly and ood_result.ood_score > near_miss_threshold)
+            # Determine if near-miss (approaching threshold but not there yet)
+            near_miss_threshold = threshold_val * 0.4
+            is_near_miss = (not is_anomaly and ood_score_val > near_miss_threshold)
             
             # Convert ALL numpy types to Python natives for JSON serialization
             # Use explicit conversion to avoid float32 serialization errors
@@ -670,6 +716,50 @@ class DiscoveryLoop:
             confidence_native = self._to_python_native(result.confidence)
             threshold_native = self._to_python_native(ood_result.threshold)
             votes_native = self._to_python_native(ood_result.votes)
+            
+            # YOLO second-stage: runs ONLY on transient-relevant sources
+            # YOLO was trained on transient data (supernovae, variable stars)
+            # and does NOT work on regular galaxy morphology images.
+            TRANSIENT_SOURCES = {
+                "ztf", "supernovae", "gravitational_lenses",
+                "galaxy_mergers", "peculiar_galaxies",
+            }
+            yolo_confirmed = False
+            yolo_confidence = 0.0
+            yolo_box = None
+            is_transient_source = source in TRANSIENT_SOURCES
+            
+            # Minimum YOLO confidence to flag as autonomous anomaly
+            # 0.25 = model detection threshold, 0.40 = auto-flag threshold
+            # Detections between 0.25 and 0.40 are logged but not auto-flagged
+            YOLO_AUTO_FLAG_CONF = 0.40
+            
+            if is_transient_source and self.yolo_detector.is_available():
+                try:
+                    yolo_result = self.yolo_detector.detect(str(image_path))
+                    yolo_confirmed = yolo_result.is_transient
+                    yolo_confidence = float(yolo_result.confidence)
+                    yolo_box = yolo_result.box_pixels
+                    
+                    if yolo_confirmed and yolo_confidence >= YOLO_AUTO_FLAG_CONF:
+                        logger.info(
+                            f"  YOLO DETECTED transient: {image_path.name} "
+                            f"({yolo_confidence:.1%} confidence) [{source}]"
+                        )
+                        # High-confidence YOLO detection = definite anomaly
+                        is_anomaly = True
+                        is_near_miss = False
+                    elif yolo_confirmed:
+                        # Low confidence YOLO -- log but don't auto-flag
+                        logger.info(
+                            f"  YOLO low-conf detection: {image_path.name} "
+                            f"({yolo_confidence:.1%} < {YOLO_AUTO_FLAG_CONF:.0%}) [{source}]"
+                        )
+                        # Keep as near-miss for review
+                        if not is_anomaly:
+                            is_near_miss = True
+                except Exception as e:
+                    logger.debug(f"  YOLO check failed for {image_path.name}: {e}")
             
             analysis = {
                 "path": str(image_path),
@@ -684,6 +774,11 @@ class DiscoveryLoop:
                 "is_near_miss": bool(is_near_miss),
                 "threshold": float(threshold_native) if threshold_native is not None else 3.0,
                 "is_duplicate": False,
+                "is_transient_source": bool(is_transient_source),
+                "yolo_ran": bool(is_transient_source and self.yolo_detector.is_available()),
+                "yolo_confirmed": bool(yolo_confirmed),
+                "yolo_confidence": float(yolo_confidence),
+                "yolo_box": yolo_box,
             }
             
             # Record for source diversity
@@ -777,11 +872,19 @@ class DiscoveryLoop:
                     anomalies_this_cycle += 1
                     self.stats.anomalies_found += 1
                     
-                    logger.info(f"\n  ⚡⚡⚡ ANOMALY DETECTED! ⚡⚡⚡")
+                    yolo_tag = ""
+                    if result.get("yolo_confirmed"):
+                        yolo_tag = " [YOLO TRANSIENT]"
+                    elif result.get("yolo_ran") and not result.get("yolo_confirmed"):
+                        yolo_tag = " [YOLO: no transient]"
+                    
+                    logger.info(f"\n  ⚡⚡⚡ ANOMALY DETECTED!{yolo_tag} ⚡⚡⚡")
                     logger.info(f"      File: {filepath.name}")
                     logger.info(f"      Source: {source}")
                     logger.info(f"      Class: {result['class_label']} ({result['confidence']:.1%})")
                     logger.info(f"      OOD Score: {result['ood_score']:.3f} (votes: {result.get('ood_votes', 0)})")
+                    if result.get("yolo_confirmed"):
+                        logger.info(f"      YOLO: {result['yolo_confidence']:.1%} confidence")
                     
                     # Save candidate (ensure all values are Python native types)
                     candidate = AnomalyCandidate(
@@ -793,15 +896,14 @@ class DiscoveryLoop:
                         confidence=float(result["confidence"]) if result["confidence"] is not None else 0.0,
                         source=str(source),
                         detected_at=datetime.now().isoformat(),
+                        yolo_confirmed=bool(result.get("yolo_confirmed", False)),
+                        yolo_confidence=float(result.get("yolo_confidence", 0.0)),
+                        is_transient_source=bool(result.get("is_transient_source", False)),
                     )
                     self.candidates.append(candidate)
                     self._save_candidates()
                     
-                    # Desktop notification
-                    self._send_notification(
-                        "🔭 AstroLens: Anomaly Detected!",
-                        f"{result['class_label']} from {source} - OOD: {result['ood_score']:.2f}"
-                    )
+                    # Desktop notifications disabled to avoid disruption
                     
                     # Log to structured logger (ensure native types)
                     structured_logger.log_anomaly(
@@ -880,6 +982,10 @@ class DiscoveryLoop:
         # Check if fine-tuning is due
         if self.stats.cycles_completed % self.finetune_every_n == 0:
             self._trigger_finetune()
+            
+            # Retrain YOLO every other fine-tune cycle
+            if self.stats.finetune_runs % 2 == 0:
+                self._trigger_yolo_retrain()
         
         # Save state
         self._save_state()
@@ -1179,6 +1285,74 @@ class DiscoveryLoop:
                 recoverable=True,
             )
 
+    def _trigger_yolo_retrain(self):
+        """
+        Retrain YOLO model on accumulated transient data.
+        
+        Runs every other fine-tune cycle (alternating with ViT training)
+        to keep the YOLO model improving alongside ViT.
+        """
+        logger.info("\n  Checking YOLO retrain conditions...")
+        
+        # Only retrain if we have enough detected transients
+        transient_dir = DOWNLOADS_DIR / "real_supernovae"
+        if not transient_dir.exists():
+            logger.info("  No transient training data available, skipping YOLO retrain")
+            return
+        
+        image_count = len(list(transient_dir.glob("*.jpg")))
+        if image_count < 20:
+            logger.info(f"  Only {image_count} transient images, need 20+ for YOLO retrain")
+            return
+        
+        logger.info(f"  Starting YOLO retrain with {image_count} images...")
+        
+        try:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "transient_detector/run_pipeline.py",
+                    "--resume",  # Use existing data, resume training
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            
+            # Stream output with timeout (YOLO training is faster than ViT)
+            import select
+            start = datetime.now()
+            max_minutes = 30
+            
+            while process.poll() is None:
+                elapsed = (datetime.now() - start).total_seconds() / 60
+                if elapsed > max_minutes:
+                    logger.warning(f"  YOLO training exceeded {max_minutes}min, terminating")
+                    process.terminate()
+                    break
+                
+                try:
+                    line = process.stdout.readline()
+                    if line:
+                        line = line.strip()
+                        if any(kw in line.lower() for kw in ['epoch', 'map', 'complete', 'saved', 'best']):
+                            logger.info(f"  [YOLO] {line}")
+                except Exception:
+                    break
+            
+            process.wait(timeout=10)
+            
+            if process.returncode == 0:
+                logger.info("  YOLO retrain complete")
+                # Force reload YOLO detector with new weights
+                self._yolo_detector = None
+            else:
+                logger.warning(f"  YOLO retrain failed (exit code {process.returncode})")
+                
+        except Exception as e:
+            logger.warning(f"  YOLO retrain error: {e}")
+
     def _send_notification(self, title: str, message: str):
         """Send desktop notification (without sound)."""
         import platform
@@ -1238,6 +1412,11 @@ class DiscoveryLoop:
             print(f"\n📁 {len(self.candidates)} candidates saved to:")
             print(f"   {CANDIDATES_FILE}")
         
+        print("="*60)
+        print()
+        print("  If AstroLens helped your research, please star the repo:")
+        print("  https://github.com/samantaba/astroLens")
+        print("  It takes 2 seconds and helps others discover the tool.")
         print("="*60)
 
     def run(self):

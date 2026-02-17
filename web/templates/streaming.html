@@ -1,0 +1,685 @@
+{% extends "base.html" %}
+{% block title %}Streaming Discovery{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+    .live-dot {
+        display: inline-block;
+        width: 10px; height: 10px;
+        border-radius: 50%;
+        margin-right: 8px;
+        vertical-align: middle;
+    }
+    .live-dot.running { background: var(--accent-emerald); animation: pulse 1.5s infinite; }
+    .live-dot.stopped { background: var(--accent-rose); }
+    .live-dot.waiting { background: var(--accent-amber); animation: pulse 2s infinite; }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+
+    .yolo-hero {
+        background: linear-gradient(135deg, rgba(91,141,239,0.1), rgba(244,114,182,0.1));
+        border: 1px solid rgba(91,141,239,0.3);
+        border-radius: 16px;
+        padding: 24px;
+        margin-bottom: 24px;
+    }
+    .yolo-hero h2 {
+        font-size: 20px;
+        font-weight: 400;
+        margin-bottom: 8px;
+    }
+    .yolo-hero .subtitle {
+        font-size: 12px;
+        color: var(--text-tertiary);
+    }
+    .yolo-stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin-top: 20px;
+    }
+    .yolo-stat {
+        text-align: center;
+    }
+    .yolo-stat .val {
+        font-size: 36px;
+        font-weight: 300;
+    }
+    .yolo-stat .lbl {
+        font-size: 10px;
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-top: 4px;
+    }
+    .yolo-stat.primary .val { color: var(--accent-rose); }
+    .yolo-stat.secondary .val { color: var(--accent-blue); }
+    .yolo-stat.tertiary .val { color: var(--accent-emerald); }
+    .yolo-stat.quaternary .val { color: var(--accent-amber); }
+
+    .chart-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+    .chart-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: 14px;
+        padding: 20px;
+    }
+    .chart-card h3 {
+        font-size: 14px;
+        font-weight: 500;
+        margin-bottom: 16px;
+        color: var(--text-secondary);
+    }
+    .chart-card canvas {
+        width: 100% !important;
+        max-height: 260px;
+    }
+
+    .detection-list {
+        list-style: none; padding: 0; margin: 0;
+    }
+    .detection-item {
+        display: flex;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(30,40,55,0.3);
+        gap: 16px;
+    }
+    .detection-item:last-child { border-bottom: none; }
+    .detection-rank {
+        width: 28px; height: 28px;
+        border-radius: 50%;
+        background: rgba(244,114,182,0.15);
+        color: var(--accent-rose);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 12px; font-weight: 600;
+        flex-shrink: 0;
+    }
+    .detection-info { flex: 1; }
+    .detection-info .name {
+        font-size: 13px;
+        color: var(--text-primary);
+    }
+    .detection-info .meta {
+        font-size: 11px;
+        color: var(--text-tertiary);
+        margin-top: 2px;
+    }
+    .detection-confidence {
+        font-size: 18px;
+        font-weight: 300;
+        color: var(--accent-rose);
+    }
+
+    .log-box {
+        background: var(--bg-void);
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        padding: 12px;
+        max-height: 200px;
+        overflow-y: auto;
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 11px;
+        color: var(--text-secondary);
+        line-height: 1.6;
+    }
+    .log-line.error { color: var(--accent-rose); }
+    .log-line.warn { color: var(--accent-amber); }
+    .log-line.correction { color: var(--accent-purple); }
+    .log-line.yolo { color: var(--accent-rose); font-weight: 600; }
+
+    .status-section {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+    .refresh-note {
+        font-size: 11px;
+        color: var(--text-tertiary);
+        text-align: right;
+        margin-top: 8px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>
+        <span class="live-dot {{ 'running' if streaming.get('running') else 'stopped' }}" id="status-dot"></span>
+        Streaming Discovery
+    </h1>
+    <p class="subtitle">
+        v1.1.0 &mdash;
+        {% if streaming.get('running') %}
+            Running &middot; Day {{ streaming.get('current_day', 0) }} of {{ streaming.get('target_days', 7) }}
+            &middot; Strategy: {{ streaming.get('current_strategy', 'normal')|upper }}
+        {% elif streaming.get('completed') %}
+            Completed &middot; {{ streaming.get('total_runtime_hours', 0)|round(1) }}h total
+        {% else %}
+            Not started &mdash; run <code>python scripts/streaming_discovery.py --days 7</code>
+        {% endif %}
+    </p>
+</div>
+
+<!-- YOLO Hero Section (primary publishable output) -->
+<div class="yolo-hero">
+    <h2>YOLO Transient Detection</h2>
+    <p class="subtitle">Primary v1.1.0 feature &mdash; real-time transient detection on streaming astronomical data</p>
+    <div class="yolo-stats">
+        <div class="yolo-stat primary">
+            <div class="val" id="yolo-confirmed">{{ streaming.get('yolo_confirmations', 0) }}</div>
+            <div class="lbl">YOLO Detections</div>
+        </div>
+        <div class="yolo-stat secondary">
+            <div class="val" id="yolo-scanned">{{ streaming.get('yolo_images_scanned', 0) }}</div>
+            <div class="lbl">Transient Images Scanned</div>
+        </div>
+        <div class="yolo-stat tertiary">
+            <div class="val" id="yolo-rate">
+                {% if streaming.get('yolo_images_scanned', 0) > 0 %}
+                    {{ (streaming.get('yolo_confirmations', 0) / streaming.get('yolo_images_scanned', 1) * 100)|round(2) }}%
+                {% else %}
+                    --
+                {% endif %}
+            </div>
+            <div class="lbl">Detection Rate</div>
+        </div>
+        <div class="yolo-stat quaternary">
+            <div class="val" id="yolo-status">{{ 'ACTIVE' if streaming.get('yolo_available') else 'STANDBY' }}</div>
+            <div class="lbl">YOLO Status</div>
+        </div>
+    </div>
+</div>
+
+<!-- Overall stats row -->
+<div class="card-grid cols-4" style="margin-bottom: 24px;">
+    <div class="stat-card">
+        <div class="value" id="total-analyzed">{{ streaming.get('total_images', 0) }}</div>
+        <div class="label">Images Analyzed</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-emerald);" id="total-anomalies">{{ streaming.get('total_anomalies', 0) }}</div>
+        <div class="label">Anomalies Found</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-purple);" id="total-corrections">{{ streaming.get('total_corrections', 0) }}</div>
+        <div class="label">Self-Corrections</div>
+    </div>
+    <div class="stat-card">
+        <div class="value" style="color: var(--accent-amber);" id="total-errors">{{ streaming.get('total_errors', 0) }}</div>
+        <div class="label">Errors</div>
+    </div>
+</div>
+
+<!-- Charts Row 1: Anomalies over time + YOLO detections -->
+<div class="chart-row">
+    <div class="chart-card">
+        <h3>Anomaly Discovery Over Time</h3>
+        <canvas id="anomalyChart"></canvas>
+    </div>
+    <div class="chart-card">
+        <h3>YOLO Detections by Day</h3>
+        <canvas id="yoloChart"></canvas>
+    </div>
+</div>
+
+<!-- Charts Row 2: Threshold + Source effectiveness -->
+<div class="chart-row">
+    <div class="chart-card">
+        <h3>OOD Threshold Adaptation</h3>
+        <canvas id="thresholdChart"></canvas>
+    </div>
+    <div class="chart-card">
+        <h3>Source Effectiveness</h3>
+        <canvas id="sourceChart"></canvas>
+    </div>
+</div>
+
+<!-- Charts Row 3: Throughput + Anomaly Rate -->
+<div class="chart-row">
+    <div class="chart-card">
+        <h3>Throughput (images/hour)</h3>
+        <canvas id="throughputChart"></canvas>
+    </div>
+    <div class="chart-card">
+        <h3>Anomaly Rate (%)</h3>
+        <canvas id="rateChart"></canvas>
+    </div>
+</div>
+
+<!-- YOLO Detections + Candidates -->
+<div class="status-section">
+    <div class="card">
+        <h3 style="font-size: 16px; font-weight: 500; margin-bottom: 16px;">Top Anomaly Candidates</h3>
+        {% if streaming.get('top_candidates') %}
+        <ul class="detection-list" id="yolo-detections-list">
+            {% for det in streaming.get('top_candidates', [])[:10] %}
+            <li class="detection-item">
+                <div class="detection-rank">{{ loop.index }}</div>
+                <div class="detection-info">
+                    <div class="name">
+                        {{ det.get('classification', 'Unknown') }}
+                        {% if det.get('yolo_confirmed') %}
+                            <span style="background: #3fb950; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 6px;">YOLO</span>
+                        {% endif %}
+                    </div>
+                    <div class="meta">
+                        Source: {{ det.get('source', '?') }} &middot;
+                        OOD: {{ "%.3f"|format(det.get('ood_score', 0)) }}
+                        {% if det.get('yolo_confirmed') %} &middot; YOLO: {{ "%.1f"|format((det.get('yolo_confidence', 0) or 0) * 100) }}%{% endif %}
+                    </div>
+                </div>
+                <div class="detection-confidence" style="{% if det.get('yolo_confirmed') %}color: #3fb950;{% else %}color: #58a6ff;{% endif %}">
+                    {% if det.get('yolo_confirmed') %}
+                        {{ "%.1f"|format((det.get('yolo_confidence', 0) or 0) * 100) }}%
+                    {% else %}
+                        {{ "%.3f"|format(det.get('ood_score', 0)) }}
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        <p style="color: var(--text-tertiary); font-size: 11px; margin-top: 8px;">
+            {{ streaming.get('total_candidates', 0) }} total &middot; {{ streaming.get('yolo_detections', 0) }} YOLO-confirmed
+        </p>
+        {% else %}
+        <p style="color: var(--text-tertiary); font-size: 13px;">
+            No detections yet. Candidates will appear as images are processed.
+        </p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h3 style="font-size: 16px; font-weight: 500; margin-bottom: 16px;">Health & Status</h3>
+        <div style="margin-bottom: 12px;" id="health-yolo">
+            <span style="font-size: 12px; color: var(--text-tertiary);">YOLO:</span>
+            <span style="font-size: 12px; color: var(--accent-amber);" id="health-yolo-val">Checking...</span>
+        </div>
+        <div style="margin-bottom: 12px;" id="health-api">
+            <span style="font-size: 12px; color: var(--text-tertiary);">API:</span>
+            <span style="font-size: 12px; color: var(--accent-amber);" id="health-api-val">Checking...</span>
+        </div>
+        <div style="margin-bottom: 12px;">
+            <span style="font-size: 12px; color: var(--text-tertiary);">Strategy:</span>
+            <span style="font-size: 12px; color: var(--text-primary);">{{ streaming.get('current_strategy', 'normal')|upper }}</span>
+        </div>
+        <div style="margin-bottom: 12px;">
+            <span style="font-size: 12px; color: var(--text-tertiary);">Threshold:</span>
+            <span style="font-size: 12px; color: var(--text-primary);" id="health-threshold">{{ "%.3f"|format(streaming.get('live_threshold', 3.0)) }}</span>
+        </div>
+        <div style="margin-bottom: 12px;">
+            <span style="font-size: 12px; color: var(--text-tertiary);">Cycles:</span>
+            <span style="font-size: 12px; color: var(--text-primary);" id="health-cycles">{{ streaming.get('live_cycles', 0) }}</span>
+        </div>
+        <div style="margin-bottom: 16px;">
+            <span style="font-size: 12px; color: var(--text-tertiary);">YOLO Retrains:</span>
+            <span style="font-size: 12px; color: var(--text-primary);">{{ streaming.get('yolo_retrain_runs', 0) }}</span>
+        </div>
+
+        <h4 style="font-size: 12px; color: var(--text-tertiary); margin-bottom: 8px;">Recent Activity</h4>
+        <div class="log-box" id="activity-log">
+            {% for snap in streaming.get('daily_snapshots', [])[-5:]|reverse %}
+            <div class="log-line">Day {{ snap.get('day', '?') }} ({{ snap.get('date', '') }}): {{ snap.get('images_analyzed', 0) }} analyzed, {{ snap.get('anomalies_found', 0) }} anomalies, YOLO: {{ snap.get('yolo_confirmations', 0) }}/{{ snap.get('yolo_images_scanned', 0) }}</div>
+            {% for c in snap.get('corrections_applied', []) %}
+            <div class="log-line correction">[SELF-CORRECT] {{ c }}</div>
+            {% endfor %}
+            {% endfor %}
+            {% if not streaming.get('daily_snapshots') %}
+            <div class="log-line">Waiting for first daily snapshot...</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Top OOD Candidates Table -->
+{% if streaming.get('best_candidates') %}
+<div class="card">
+    <h3 style="font-size: 16px; font-weight: 500; margin-bottom: 16px;">Top Anomaly Candidates</h3>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Classification</th>
+                <th>Source</th>
+                <th>OOD Score</th>
+                <th>YOLO</th>
+                <th>Confidence</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in streaming.get('best_candidates', [])[:15] %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ c.get('classification', c.get('class_label', 'N/A')) }}</td>
+                <td>{{ c.get('source', '?') }}</td>
+                <td>{{ "%.3f"|format(c.get('ood_score', 0)) }}</td>
+                <td>
+                    {% if c.get('yolo_confirmed') %}
+                        <span class="badge badge-anomaly">CONFIRMED</span>
+                    {% elif c.get('yolo_ran') %}
+                        <span class="badge badge-known">scanned</span>
+                    {% else %}
+                        <span style="color: var(--text-tertiary);">--</span>
+                    {% endif %}
+                </td>
+                <td>{{ "%.1f"|format((c.get('confidence', 0) or 0) * 100) }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="refresh-note">Auto-refreshes every 30 seconds &middot; Last: <span id="last-refresh">{{ now }}</span></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Chart.js defaults for dark theme
+Chart.defaults.color = '#7a8599';
+Chart.defaults.borderColor = 'rgba(30,40,55,0.5)';
+Chart.defaults.font.family = "'Inter', sans-serif";
+
+// Data from server
+const snapshots = {{ snapshots_json|safe }};
+
+// Extract data arrays
+const labels = snapshots.map(s => 'Day ' + s.day);
+const anomalies = snapshots.map(s => s.anomalies_found || 0);
+const analyzed = snapshots.map(s => s.images_analyzed || 0);
+const threshStart = snapshots.map(s => s.threshold_start || 3.0);
+const threshEnd = snapshots.map(s => s.threshold_end || 3.0);
+const throughput = snapshots.map(s => s.images_per_hour || 0);
+const rates = snapshots.map(s => s.anomaly_rate || 0);
+const yoloConf = snapshots.map(s => s.yolo_confirmations || 0);
+const yoloScanned = snapshots.map(s => s.yolo_images_scanned || 0);
+
+// Source data
+const sourceData = {{ source_json|safe }};
+
+// 1. Anomaly chart
+new Chart(document.getElementById('anomalyChart'), {
+    type: 'bar',
+    data: {
+        labels: labels,
+        datasets: [
+            {
+                label: 'Anomalies',
+                data: anomalies,
+                backgroundColor: 'rgba(244,114,182,0.6)',
+                borderColor: 'rgba(244,114,182,1)',
+                borderWidth: 1,
+                borderRadius: 4,
+            },
+            {
+                label: 'Analyzed',
+                data: analyzed,
+                backgroundColor: 'rgba(91,141,239,0.3)',
+                borderColor: 'rgba(91,141,239,0.6)',
+                borderWidth: 1,
+                borderRadius: 4,
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { position: 'bottom' } },
+        scales: { y: { beginAtZero: true } }
+    }
+});
+
+// 2. YOLO detections chart
+new Chart(document.getElementById('yoloChart'), {
+    type: 'bar',
+    data: {
+        labels: labels,
+        datasets: [
+            {
+                label: 'YOLO Confirmed',
+                data: yoloConf,
+                backgroundColor: 'rgba(244,114,182,0.7)',
+                borderColor: 'rgba(244,114,182,1)',
+                borderWidth: 1,
+                borderRadius: 4,
+            },
+            {
+                label: 'Transient Scanned',
+                data: yoloScanned,
+                backgroundColor: 'rgba(155,124,239,0.3)',
+                borderColor: 'rgba(155,124,239,0.6)',
+                borderWidth: 1,
+                borderRadius: 4,
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { position: 'bottom' } },
+        scales: { y: { beginAtZero: true } }
+    }
+});
+
+// 3. Threshold chart
+new Chart(document.getElementById('thresholdChart'), {
+    type: 'line',
+    data: {
+        labels: labels,
+        datasets: [{
+            label: 'Threshold',
+            data: threshEnd,
+            borderColor: 'rgba(251,191,36,0.9)',
+            backgroundColor: 'rgba(251,191,36,0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 4,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: false } }
+    }
+});
+
+// 4. Source effectiveness (doughnut)
+const srcLabels = Object.keys(sourceData);
+const srcAnomalies = srcLabels.map(k => (sourceData[k]?.anomalies || 0));
+const srcColors = [
+    'rgba(91,141,239,0.8)', 'rgba(244,114,182,0.8)', 'rgba(52,211,153,0.8)',
+    'rgba(251,191,36,0.8)', 'rgba(155,124,239,0.8)', 'rgba(239,91,91,0.8)'
+];
+
+if (srcLabels.length > 0) {
+    new Chart(document.getElementById('sourceChart'), {
+        type: 'doughnut',
+        data: {
+            labels: srcLabels,
+            datasets: [{
+                data: srcAnomalies,
+                backgroundColor: srcColors.slice(0, srcLabels.length),
+                borderWidth: 0,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'right', labels: { boxWidth: 12, padding: 12 } }
+            }
+        }
+    });
+} else {
+    document.getElementById('sourceChart').parentElement.innerHTML +=
+        '<p style="color: var(--text-tertiary); font-size: 12px; text-align: center;">No source data yet</p>';
+}
+
+// 5. Throughput chart
+new Chart(document.getElementById('throughputChart'), {
+    type: 'line',
+    data: {
+        labels: labels,
+        datasets: [{
+            label: 'Images/hour',
+            data: throughput,
+            borderColor: 'rgba(52,211,153,0.9)',
+            backgroundColor: 'rgba(52,211,153,0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 4,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true } }
+    }
+});
+
+// 6. Anomaly Rate chart
+new Chart(document.getElementById('rateChart'), {
+    type: 'line',
+    data: {
+        labels: labels,
+        datasets: [{
+            label: 'Anomaly Rate %',
+            data: rates,
+            borderColor: 'rgba(155,124,239,0.9)',
+            backgroundColor: 'rgba(155,124,239,0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 4,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true } }
+    }
+});
+
+// Live health checks
+function checkHealth() {
+    // Check API
+    fetch('/api/stats')
+        .then(r => {
+            const el = document.getElementById('health-api-val');
+            if (r.ok) {
+                el.textContent = 'Running';
+                el.style.color = 'var(--accent-emerald)';
+            } else {
+                el.textContent = 'Error (' + r.status + ')';
+                el.style.color = 'var(--accent-rose)';
+            }
+        })
+        .catch(() => {
+            const el = document.getElementById('health-api-val');
+            el.textContent = 'Not responding';
+            el.style.color = 'var(--accent-rose)';
+        });
+
+    // Check YOLO via streaming state
+    fetch('/api/streaming-state')
+        .then(r => r.json())
+        .then(data => {
+            const yel = document.getElementById('health-yolo-val');
+            if (data.yolo_available) {
+                yel.textContent = 'Active';
+                yel.style.color = 'var(--accent-emerald)';
+            } else {
+                yel.textContent = 'Standby (loads on first transient source)';
+                yel.style.color = 'var(--accent-amber)';
+            }
+            // Update threshold and cycles
+            const thresh = data.live_threshold || 3.0;
+            document.getElementById('health-threshold').textContent = thresh.toFixed(3);
+            document.getElementById('health-cycles').textContent = data.live_cycles || 0;
+        })
+        .catch(() => {});
+}
+checkHealth();
+
+// Auto-refresh every 15 seconds
+setInterval(() => {
+    fetch('/api/streaming-state')
+        .then(r => r.json())
+        .then(data => {
+            // Prefer live_ fields (from discovery_state, updated every cycle)
+            const images = data.live_images || data.total_images || 0;
+            const anomalies = data.live_anomalies || data.total_anomalies || 0;
+            const threshold = data.live_threshold || 3.0;
+            const cycles = data.live_cycles || 0;
+
+            // Update stat cards
+            document.getElementById('yolo-confirmed').textContent = data.yolo_detections || data.yolo_confirmations || 0;
+            document.getElementById('yolo-scanned').textContent = data.yolo_images_scanned || 0;
+            document.getElementById('total-analyzed').textContent = images.toLocaleString();
+            document.getElementById('total-anomalies').textContent = anomalies;
+            document.getElementById('total-corrections').textContent = data.total_corrections || 0;
+            document.getElementById('total-errors').textContent = data.total_errors || 0;
+
+            // Update YOLO rate
+            const scanned = data.yolo_images_scanned || 0;
+            const confirmed = data.yolo_detections || data.yolo_confirmations || 0;
+            document.getElementById('yolo-rate').textContent =
+                scanned > 0 ? (confirmed / scanned * 100).toFixed(2) + '%' : '--';
+
+            document.getElementById('yolo-status').textContent =
+                data.yolo_available ? 'ACTIVE' : (confirmed > 0 ? 'ACTIVE' : 'STANDBY');
+
+            // Update status dot
+            const dot = document.getElementById('status-dot');
+            if (data.running) {
+                dot.className = 'live-dot running';
+            } else if (data.completed) {
+                dot.className = 'live-dot stopped';
+            } else {
+                dot.className = 'live-dot waiting';
+            }
+
+            // Update health panel
+            const hThreshold = document.getElementById('health-threshold');
+            if (hThreshold) hThreshold.textContent = threshold.toFixed(3);
+            const hCycles = document.getElementById('health-cycles');
+            if (hCycles) hCycles.textContent = cycles;
+
+            // Update candidates list
+            if (data.top_candidates && data.top_candidates.length > 0) {
+                const list = document.getElementById('yolo-detections-list');
+                if (list) {
+                    let html = '';
+                    data.top_candidates.slice(0, 10).forEach((det, i) => {
+                        const isYolo = det.yolo_confirmed;
+                        const badge = isYolo ? '<span style="background: #3fb950; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 6px;">YOLO</span>' : '';
+                        const conf = isYolo ? (det.yolo_confidence * 100).toFixed(1) + '%' : det.ood_score.toFixed(3);
+                        const confColor = isYolo ? '#3fb950' : '#58a6ff';
+                        html += `<li class="detection-item">
+                            <div class="detection-rank">${i+1}</div>
+                            <div class="detection-info">
+                                <div class="name">${det.classification || 'Unknown'}${badge}</div>
+                                <div class="meta">Source: ${det.source || '?'} · OOD: ${det.ood_score.toFixed(3)}${isYolo ? ' · YOLO: ' + (det.yolo_confidence * 100).toFixed(1) + '%' : ''}</div>
+                            </div>
+                            <div class="detection-confidence" style="color: ${confColor};">${conf}</div>
+                        </li>`;
+                    });
+                    list.innerHTML = html;
+                }
+            }
+
+            // Update timestamp
+            document.getElementById('last-refresh').textContent =
+                new Date().toLocaleTimeString() +
+                (cycles > 0 ? ' (cycle ' + cycles + ', threshold=' + threshold.toFixed(3) + ', ' + anomalies + ' anomalies)' : '');
+        })
+        .catch(() => {});
+    checkHealth();
+}, 15000);
+</script>
+{% endblock %}
