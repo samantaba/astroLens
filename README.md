@@ -147,8 +147,18 @@ python -m web.app --port 8080
 ## Demo
 
 <p align="center">
-  <img src="assets/demo.gif" alt="AstroLens Demo" width="800"/>
-  <br><em>AstroLens in action -- autonomous discovery, analysis, and cross-reference</em>
+  <img src="assets/detect.gif" alt="Anomaly Detection" width="800"/>
+  <br><em>Anomaly Detection -- AI identifies unusual objects with OOD scoring and YOLO transient detection</em>
+</p>
+
+<p align="center">
+  <img src="assets/viewer.gif" alt="Gallery and Viewer" width="800"/>
+  <br><em>Gallery and Viewer -- Browse, inspect, and verify detected anomaly candidates</em>
+</p>
+
+<p align="center">
+  <img src="assets/visualise.gif" alt="Web Analysis" width="800"/>
+  <br><em>Web Dashboard -- Statistics, streaming charts, and analysis insights in the browser</em>
 </p>
 
 ## Screenshots
