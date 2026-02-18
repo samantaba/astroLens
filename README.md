@@ -144,6 +144,13 @@ python -m web.app --port 8080
 
 ---
 
+## Demo
+
+<p align="center">
+  <img src="assets/demo.gif" alt="AstroLens Demo" width="800"/>
+  <br><em>AstroLens in action -- autonomous discovery, analysis, and cross-reference</em>
+</p>
+
 ## Screenshots
 
 <p align="center">
@@ -174,6 +181,7 @@ The web interface runs at `http://localhost:8080` and provides:
 | Transient Mode | `/transient` | Monitor YOLO training pipeline progress |
 | Verify | `/verify` | View cross-reference results (Known vs Unknown) |
 | Export | `/export` | One-click export to CSV, JSON, HTML, VOTable |
+| Streaming | `/streaming` | Live streaming discovery dashboard with charts |
 
 ---
 
