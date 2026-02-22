@@ -24,7 +24,8 @@
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#streaming-discovery-v110">Streaming Discovery</a> &bull;
   <a href="#how-it-works">How It Works</a> &bull;
-  <a href="https://github.com/samantaba/astroLens/wiki">Wiki</a>
+  <a href="https://github.com/samantaba/astroLens/wiki">Wiki</a> &bull;
+  <a href="https://deepfieldlabs.github.io">Website</a>
 </p>
 
 ---
@@ -35,13 +36,13 @@ AstroLens is an open-source tool that automatically scans the sky for unusual as
 
 Think of it as a tireless research assistant that never sleeps. It watches the sky 24/7, learns as it goes, corrects its own mistakes, and presents you with a shortlist of the most promising discoveries -- all without any human supervision.
 
-**In a 3-day autonomous test run, AstroLens:**
+**In autonomous streaming discovery, AstroLens:**
 
-- Analyzed **20,997 images** from 7 astronomical survey sources
-- Identified **3,458 anomaly candidates** across 354 unique sky regions
-- Independently recovered known objects including **Supernova SN 2014J**, galaxy merger **NGC 3690**, and gravitational lens **SDSS J0252+0039** -- without being told what to look for
+- Analyzed **22,195 images** from 7 astronomical survey sources across **5,471 unique sky regions**
+- Identified **3,541 anomaly candidates** and cross-referenced **269 known objects** against SIMBAD and NED catalogs
+- Independently recovered notable objects including **Supernova SN 2014J**, galaxy merger **NGC 3690**, and gravitational lens **SDSS J0252+0039** -- without being told what to look for
 - Trained its own transient detection model to **99.5% accuracy** using data it collected during the run
-- Made **140 self-correction adjustments** with zero errors and zero human intervention
+- Made **146 self-correction adjustments** with zero errors and zero human intervention
 
 ---
 
@@ -55,7 +56,7 @@ During streaming discovery, AstroLens independently flagged these known, publish
 | **NGC 3690** | Violent galaxy merger (Arp 299), one of the most luminous infrared galaxies nearby | 60% | 0.11 |
 | **SDSS J0252+0039** | Confirmed strong gravitational lens -- massive galaxy bending background light | 61% | 0.35 |
 
-All detections were cross-referenced against the **SIMBAD international astronomical database**. The system found these objects on its own, using only the AI models and no prior knowledge of what was in the images.
+All detections were cross-referenced against the **SIMBAD** and **NED** astronomical databases. In total, **269 known objects** were independently recovered and confirmed, with **173 having published references**. The system found these objects on its own, using only the AI models and no prior knowledge of what was in the images.
 
 ---
 
@@ -258,7 +259,7 @@ The web interface runs at `http://localhost:8080` and provides:
 
 ## Milestone: v1.1.0
 
-Streaming discovery with self-correcting intelligence. Validated over a 3-day autonomous run: 20,997 images analyzed, 3,458 anomaly candidates, known astronomical objects independently recovered.
+Streaming discovery with self-correcting intelligence. Validated in autonomous operation: 22,195 images analyzed across 5,471 sky regions, 3,541 anomaly candidates identified, 269 known astronomical objects independently recovered and confirmed against SIMBAD/NED.
 
 **ML Pipeline**
 - Vision Transformer fine-tuned on Galaxy10 + Galaxy Zoo (83.9% accuracy, +4.9% improvement)
@@ -407,6 +408,7 @@ CI will run tests automatically on your PR.
 
 ## Support
 
+- **Website:** [deepfieldlabs.github.io](https://deepfieldlabs.github.io)
 - **Issues:** [GitHub Issues](https://github.com/samantaba/astroLens/issues)
 - **Discussions:** [GitHub Discussions](https://github.com/samantaba/astroLens/discussions)
 - **Wiki:** [Full Documentation](https://github.com/samantaba/astroLens/wiki)

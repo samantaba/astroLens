@@ -2,6 +2,8 @@
 
 Comprehensive documentation for AstroLens -- the AI-Powered Galaxy Anomaly Discovery System.
 
+**Website:** [deepfieldlabs.github.io](https://deepfieldlabs.github.io) | **GitHub:** [samantaba/astroLens](https://github.com/samantaba/astroLens)
+
 ---
 
 ## Table of Contents

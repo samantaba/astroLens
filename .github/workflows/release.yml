@@ -215,7 +215,7 @@ jobs:
             - **Web Streaming Dashboard**: Live monitoring with Chart.js visualizations
             - **Desktop Streaming Panel**: Start, stop, and monitor from the native UI
 
-            Validated in a 3-day autonomous run: 20,997 images analyzed, 3,458 anomaly candidates, known objects independently recovered (SN 2014J, NGC 3690, SDSS J0252+0039).
+            Validated in autonomous operation: 22,195 images analyzed across 5,471 sky regions, 3,541 anomaly candidates, 269 known objects independently recovered and confirmed against SIMBAD/NED (including SN 2014J, NGC 3690, SDSS J0252+0039).
 
             ### Downloads
             | Platform | File |
@@ -235,7 +235,7 @@ jobs:
             - 8GB+ RAM recommended
             - GPU optional (CUDA / Apple MPS auto-detected)
 
-            Full documentation: [README](https://github.com/samantaba/astroLens) | [Wiki](https://github.com/samantaba/astroLens/wiki)
+            Full documentation: [Website](https://deepfieldlabs.github.io) | [README](https://github.com/samantaba/astroLens) | [Wiki](https://github.com/samantaba/astroLens/wiki)
           files: |
             release-assets/*.zip
           draft: false
